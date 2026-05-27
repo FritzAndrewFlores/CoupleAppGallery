@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "534111994915",
+    "project_id": "couple-gallery-app",
+    "storage_bucket": "couple-gallery-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:534111994915:android:e5f72f60aed3cfee2b5d96",
+        "android_client_info": {
+          "package_name": "com.example.coupleappgallery"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD31N_joNLdMor4-EJpzUZrSUv-7OUSjp4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

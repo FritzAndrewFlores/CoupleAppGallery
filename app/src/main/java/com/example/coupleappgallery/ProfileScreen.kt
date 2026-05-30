@@ -65,7 +65,7 @@ fun ProfileScreen(navController: NavController, currentTheme: AppTheme) {
     var displayName by remember { mutableStateOf("") }
     var photoUrl by remember { mutableStateOf("") }
     var currentPartnerId by remember { mutableStateOf("") }
-    var partnerName by remember { mutableStateOf("") }
+    val partnerName = SessionCache.partnerName
     var myMood by remember { mutableStateOf("😊") }
     var myNote by remember { mutableStateOf("") }
 
@@ -132,9 +132,7 @@ fun ProfileScreen(navController: NavController, currentTheme: AppTheme) {
                     }
                 }
 
-                if (currentPartnerId.isNotEmpty()) {
-                    db.collection("users").document(currentPartnerId).get().addOnSuccessListener { pDoc -> partnerName = pDoc.getString("name") ?: "Partner" }
-                }
+                // partnerName is provided by SessionCache — no per-screen fetch needed
             }
         }
         onDispose { reg?.remove() }
@@ -375,7 +373,7 @@ fun ProfileScreen(navController: NavController, currentTheme: AppTheme) {
                 ) { Text(if (isSaving) "Saving..." else "Save Changes") }
 
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { auth.signOut(); navController.navigate("login") }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(0.7f)), modifier = Modifier.fillMaxWidth()) { Text("Log Out") }
+                Button(onClick = { SessionCache.clear(); auth.signOut(); navController.navigate("login") }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(0.7f)), modifier = Modifier.fillMaxWidth()) { Text("Log Out") }
             }
         }
     }

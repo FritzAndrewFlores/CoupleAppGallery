@@ -92,10 +92,10 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
     val myId = auth.currentUser?.uid ?: ""
     val context = LocalContext.current
 
-    var partnerId by remember { mutableStateOf("") }
-    var partnerName by remember { mutableStateOf("Partner") }
-    var partnerPhotoUrl by remember { mutableStateOf("") }
-    var myPhotoUrl by remember { mutableStateOf("") }
+    val partnerId = SessionCache.partnerId
+    val partnerName = SessionCache.partnerName
+    val partnerPhotoUrl = SessionCache.partnerPhotoUrl
+    val myPhotoUrl = SessionCache.userPhotoUrl
 
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var text by remember { mutableStateOf("") }
@@ -137,24 +137,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
         }
     }
 
-    // 1. Get User & Partner Info — outer listener owns user's own doc
-    DisposableEffect(myId) {
-        if (myId.isEmpty()) return@DisposableEffect onDispose { }
-        val reg = db.collection("users").document(myId).addSnapshotListener { doc, _ ->
-            partnerId = doc?.getString("partnerId") ?: ""
-            myPhotoUrl = doc?.getString("photoUrl") ?: ""
-
-            if (partnerId.isNotEmpty()) {
-                db.collection("users").document(partnerId).get().addOnSuccessListener { pDoc ->
-                    partnerName = pDoc.getString("name") ?: "Partner"
-                    partnerPhotoUrl = pDoc.getString("photoUrl") ?: ""
-                }
-            }
-        }
-        onDispose { reg.remove() }
-    }
-
-    // 2. Listen for Messages — separate listener, re-registers when partnerId changes
+    // Listen for Messages — re-registers when partnerId changes (SessionCache state drives re-key)
     DisposableEffect(myId, partnerId) {
         if (partnerId.isEmpty()) return@DisposableEffect onDispose { }
         val reg = db.collection("chats")

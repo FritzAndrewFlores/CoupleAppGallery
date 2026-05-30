@@ -93,19 +93,15 @@ fun SpecialDaysScreen(navController: NavController, currentTheme: AppTheme) {
     val db = remember { FirebaseFirestore.getInstance() }
     val auth = remember { FirebaseAuth.getInstance() }
     val myId = auth.currentUser?.uid ?: ""
-    var partnerId by remember { mutableStateOf("") }
-    var myName by remember { mutableStateOf("Me") }
+    val partnerId = SessionCache.partnerId
+    val myName = SessionCache.userName
 
     val primaryColor = currentTheme.primary
     val backgroundColor = currentTheme.background
 
     DisposableEffect(myId) {
         if (myId.isEmpty()) return@DisposableEffect onDispose { }
-        // One-shot user info fetch — no cleanup needed
-        db.collection("users").document(myId).get().addOnSuccessListener {
-            partnerId = it.getString("partnerId") ?: ""
-            myName = it.getString("name") ?: "Me"
-        }
+        // partnerId and myName sourced from SessionCache — no per-screen user fetch needed
         val reg = db.collection("special_days")
             .whereArrayContains("participants", myId)
             .addSnapshotListener { snapshot: QuerySnapshot?, _: FirebaseFirestoreException? ->

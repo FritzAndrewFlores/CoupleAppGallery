@@ -79,6 +79,11 @@ class MainActivity : ComponentActivity() {
             val navController = rememberNavController()
             val userId = auth.currentUser?.uid
 
+            // Initialize process-scoped SessionCache for user + partner profile data
+            LaunchedEffect(userId) {
+                if (userId != null) SessionCache.init(userId) else SessionCache.clear()
+            }
+
             // 2. STATE FOR CURRENT THEME
             var currentTheme by remember { mutableStateOf(appThemes["forest_green"]!!) }
 

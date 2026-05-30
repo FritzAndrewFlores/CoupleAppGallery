@@ -62,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -159,22 +160,22 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showColorPickerFor by remember { mutableStateOf<HomeCardType?>(null) }
 
-    // User Data
-    var profilePicUrl by remember { mutableStateOf("") }
-    var partnerMood by remember { mutableStateOf("") }
-    var partnerNote by remember { mutableStateOf("") }
-    var partnerName by remember { mutableStateOf("Partner") }
-    var partnerStatus by remember { mutableStateOf("Offline") }
-    var myName by remember { mutableStateOf("Me") }
+    // User Data — sourced from SessionCache (single process-scoped listener)
+    val profilePicUrl = SessionCache.userPhotoUrl
+    val myName = SessionCache.userName
+    val partnerMood = SessionCache.partnerMood
+    val partnerNote = SessionCache.partnerLoveNote
+    val partnerName = SessionCache.partnerName
+    val partnerStatus = SessionCache.partnerStatus
     var unreadCount by remember { mutableIntStateOf(0) }
     var historyItems by remember { mutableStateOf(listOf<ActivityItem>()) }
     var activeRequests by remember { mutableStateOf(listOf<PartnerRequest>()) }
 
-    // Card Colors State
-    var moodBgId by remember { mutableStateOf("glass_light") }
-    var requestBgId by remember { mutableStateOf("grad_romantic") }
-    var noteBgId by remember { mutableStateOf("glass_light") }
-    var wishlistBgId by remember { mutableStateOf("glass_light") }
+    // Card Colors — sourced from SessionCache
+    val moodBgId = SessionCache.moodBgId
+    val requestBgId = SessionCache.requestBgId
+    val noteBgId = SessionCache.noteBgId
+    val wishlistBgId = SessionCache.wishlistBgId
 
     // Pattern A: cache list-find results; only re-search when the bg-id state changes
     val moodBg = remember(moodBgId) { availableCardBackgrounds.find { it.id == moodBgId } ?: availableCardBackgrounds[0] }
@@ -200,7 +201,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
     val auth = remember { FirebaseAuth.getInstance() }
     val db = remember { FirebaseFirestore.getInstance() }
     val userId = auth.currentUser?.uid ?: ""
-    var partnerId by remember { mutableStateOf("") }
+    val partnerId = SessionCache.partnerId
 
     val primaryColor = currentTheme.primary
     val backgroundColor = currentTheme.background
@@ -220,34 +221,6 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
             }
         }
         createNotificationChannel(context)
-    }
-
-    // Outer listener — user's own doc; split from partner listener so each has a clean lifecycle
-    DisposableEffect(userId) {
-        if (userId.isEmpty()) return@DisposableEffect onDispose { }
-        val reg = db.collection("users").document(userId).addSnapshotListener { doc, _ ->
-            partnerId = doc?.getString("partnerId") ?: ""
-            profilePicUrl = doc?.getString("photoUrl") ?: ""
-            myName = doc?.getString("name") ?: "Me"
-
-            moodBgId = doc?.getString("moodBgId") ?: "glass_light"
-            requestBgId = doc?.getString("requestBgId") ?: "grad_romantic"
-            noteBgId = doc?.getString("noteBgId") ?: "glass_light"
-            wishlistBgId = doc?.getString("wishlistBgId") ?: "glass_light"
-        }
-        onDispose { reg.remove() }
-    }
-
-    // Separate listener — partner's doc; re-registers when partnerId changes
-    DisposableEffect(partnerId) {
-        if (partnerId.isEmpty()) return@DisposableEffect onDispose { }
-        val reg = db.collection("users").document(partnerId).addSnapshotListener { pDoc, _ ->
-            partnerMood = pDoc?.getString("mood") ?: ""
-            partnerNote = pDoc?.getString("loveNote") ?: ""
-            partnerName = pDoc?.getString("name") ?: "Partner"
-            partnerStatus = pDoc?.getString("status") ?: "Offline"
-        }
-        onDispose { reg.remove() }
     }
 
     DisposableEffect(userId) {
@@ -596,7 +569,7 @@ fun FolderItem(folder: CoupleFolder, currentTheme: AppTheme, onDelete: () -> Uni
     var showMenu by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.height(160.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(baseColor.copy(alpha=0.7f)).border(1.dp, Color.White.copy(0.6f), RoundedCornerShape(24.dp)).clickable { onClick() }) {
-        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Text(folder.iconName, style = MaterialTheme.typography.displayMedium); Spacer(modifier = Modifier.height(8.dp)); Text(folder.name, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = contentColor); if (timeText.isNotEmpty()) Text(timeText, style = MaterialTheme.typography.labelSmall, color = contentColor.copy(alpha=0.7f)) }
+        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Text(folder.iconName, style = MaterialTheme.typography.displayMedium); Spacer(modifier = Modifier.height(8.dp)); Text(folder.name, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, color = contentColor, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp)); if (timeText.isNotEmpty()) Text(timeText, style = MaterialTheme.typography.labelSmall, color = contentColor.copy(alpha=0.7f)) }
         Box(modifier = Modifier.align(Alignment.TopEnd)) { IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "Options", tint = contentColor.copy(alpha=0.6f)) }; DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, containerColor = currentTheme.surface) { DropdownMenuItem(text = { Text("Edit", color = currentTheme.text) }, onClick = { showMenu = false; onEdit() }, leadingIcon = { Icon(Icons.Default.Edit, null, tint = currentTheme.primary) }); DropdownMenuItem(text = { Text("Delete", color = Color.Red) }, onClick = { showMenu = false; onDelete() }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color.Red) }) } }
     }
 }

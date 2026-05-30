@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; java -version 2>&1; echo \"JAVA_HOME: $env:JAVA_HOME\")"
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; java -version 2>&1; echo \"JAVA_HOME: $env:JAVA_HOME\")",
+      "PowerShell($env:JAVA_HOME = \"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\"; $env:PATH = \"$env:JAVA_HOME\\\\bin;$env:PATH\"; Set-Location \"C:\\\\Users\\\\Fritz Andrew\\\\AndroidStudioProjects\\\\CoupleAppGallery\"; .\\\\gradlew :app:compileDebugKotlin --no-daemon --console=plain 2>&1)"
     ]
   }
 }

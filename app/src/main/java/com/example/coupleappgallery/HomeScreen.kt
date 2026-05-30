@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -159,6 +160,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
     var folderToEdit by remember { mutableStateOf<CoupleFolder?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) }
     var showColorPickerFor by remember { mutableStateOf<HomeCardType?>(null) }
+    var showHistorySheet by remember { mutableStateOf(false) }
 
     // User Data — sourced from SessionCache (single process-scoped listener)
     val profilePicUrl = SessionCache.userPhotoUrl
@@ -259,7 +261,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                     TopAppBar(
                         title = {
                             Column {
-                                Text("Our Home", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
+                                Text("Couple Sync", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                                     val pulseAlpha by infiniteTransition.animateFloat(initialValue = 0.4f, targetValue = 1f, animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse), label = "pulseAlpha")
@@ -272,6 +274,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = if (currentTheme.id == "custom") Color.Black.copy(0.3f) else backgroundColor.copy(alpha=0.9f), titleContentColor = if (currentTheme.id == "custom") Color.White else primaryColor),
                         actions = {
+                            IconButton(onClick = { showHistorySheet = true }) { Icon(Icons.Default.Notifications, "History", tint = if (currentTheme.id == "custom") Color.White else primaryColor) }
                             IconButton(onClick = { navController.navigate("special_days") }) { Icon(Icons.Default.DateRange, "Calendar", tint = if (currentTheme.id == "custom") Color.White else primaryColor) }
                             IconButton(onClick = { navController.navigate("chat") }) {
                                 if (unreadCount > 0) BadgedBox(badge = { Badge(containerColor = Color.Red, contentColor = Color.White) { Text("$unreadCount") } }) { Icon(Icons.Default.Email, "Chat", tint = if (currentTheme.id == "custom") Color.White else primaryColor) }
@@ -289,19 +292,40 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                         contentColor = if (currentTheme.id == "custom") Color.White else primaryColor,
                         indicator = { tabPositions -> TabRowDefaults.SecondaryIndicator(Modifier.tabIndicatorOffset(tabPositions[selectedTab]), color = if (currentTheme.id == "custom") Color.White else primaryColor) }
                     ) {
-                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Adventures 🌲") })
-                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("History 📜") })
+                        Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Albums", fontWeight = FontWeight.Bold) })
+                        Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Together 💌", fontWeight = FontWeight.Bold) })
                     }
                 }
             },
             floatingActionButton = {
-                if (selectedTab == 0) FloatingActionButton(onClick = { folderToEdit = null; showDialog = true }, containerColor = primaryColor, contentColor = surfaceColor) { Icon(Icons.Default.Add, "Add Folder") }
+                FloatingActionButton(onClick = { folderToEdit = null; showDialog = true }, containerColor = primaryColor, contentColor = surfaceColor) { Icon(Icons.Default.Add, "Add Folder") }
             }
         ) { padding ->
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 if (selectedTab == 0) {
+                    // ALBUMS TAB: folder grid only
                     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-
+                        items(folders.chunked(2), key = { it.first().id }) { rowFolders ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                for (folder in rowFolders) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        FolderItem(
+                                            folder = folder, currentTheme = currentTheme,
+                                            onDelete = { db.collection("folders").document(folder.id).delete(); if (partnerId.isNotEmpty()) sendNotification(db, partnerId, "Deleted Item 🗑️", "$myName deleted folder: ${folder.name}") },
+                                            onEdit = { folderToEdit = folder; showDialog = true },
+                                            onClick = { navController.navigate("gallery/${folder.id}") }
+                                        )
+                                    }
+                                }
+                                if (rowFolders.size == 1) Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                        item { Spacer(modifier = Modifier.height(60.dp)) }
+                    }
+                } else {
+                    // TOGETHER TAB: your-status editor on top, then mood / wants / note / wishlist cards
+                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        item { YourStatusCard(currentTheme, db, context) }
                         items(cardOrder, key = { it }) { cardType ->
                             if (cardType == HomeCardType.WISHLIST && activeRequests.isEmpty()) return@items
 
@@ -332,30 +356,20 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                                 }
                             }
                         }
-
-                        item { Spacer(modifier = Modifier.height(8.dp)); Text("Where nature meets memory.", color = if (currentTheme.id == "custom") Color.White else textColor, fontFamily = FontFamily.Serif) }
-
-                        items(folders.chunked(2), key = { it.first().id }) { rowFolders ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                for (folder in rowFolders) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        FolderItem(
-                                            folder = folder, currentTheme = currentTheme,
-                                            onDelete = { db.collection("folders").document(folder.id).delete(); if (partnerId.isNotEmpty()) sendNotification(db, partnerId, "Deleted Item 🗑️", "$myName deleted folder: ${folder.name}") },
-                                            onEdit = { folderToEdit = folder; showDialog = true },
-                                            onClick = { navController.navigate("gallery/${folder.id}") }
-                                        )
-                                    }
-                                }
-                                if (rowFolders.size == 1) Spacer(modifier = Modifier.weight(1f))
-                            }
-                        }
                         item { Spacer(modifier = Modifier.height(60.dp)) }
                     }
-                } else {
-                    HistoryTab(db, userId, currentTheme, primaryColor, textColor, historyItems, context)
                 }
             }
+        }
+    }
+
+    // HISTORY BOTTOM SHEET
+    if (showHistorySheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showHistorySheet = false },
+            containerColor = currentTheme.background
+        ) {
+            HistoryTab(db, userId, currentTheme, primaryColor, textColor, historyItems, context)
         }
     }
 
@@ -460,6 +474,101 @@ fun WishlistCard(requests: List<PartnerRequest>, partnerName: String, partnerId:
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(req.emoji, fontSize = 24.sp); Spacer(modifier = Modifier.width(8.dp)); Text(req.label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = textCol) }
                     Button(onClick = { onTrigger(req.emoji); db.collection("requests").document(req.id).delete(); sendNotification(db, partnerId, "Wish Granted! ✅", "$myName gave you: ${req.label} ${req.emoji}") }, colors = ButtonDefaults.buttonColors(containerColor = if(bg.darkText) primary else Color.White), shape = RoundedCornerShape(50), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp), modifier = Modifier.height(36.dp)) {
                         Text("Give", color = if(bg.darkText) Color.White else primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun YourStatusCard(theme: AppTheme, db: FirebaseFirestore, context: Context) {
+    val uid = SessionCache.userId
+    var showMoodPicker by remember { mutableStateOf(false) }
+    var showNoteEditor by remember { mutableStateOf(false) }
+    var noteDraft by remember { mutableStateOf("") }
+
+    // Mood set matches ProfileScreen.kt exactly (10 moods)
+    val moods = remember {
+        listOf(
+            "😊" to "Happy", "🥰" to "Loved", "🥳" to "Excited",
+            "😎" to "Cool", "😴" to "Tired", "😤" to "Angry",
+            "🤯" to "Stressed", "🤒" to "Sick", "🥺" to "Sad",
+            "😐" to "Neutral"
+        )
+    }
+
+    // Pre-fill noteDraft with the user's current love note when the editor opens
+    LaunchedEffect(showNoteEditor) {
+        if (showNoteEditor && uid.isNotEmpty()) {
+            db.collection("users").document(uid).get().addOnSuccessListener { doc ->
+                noteDraft = doc.getString("loveNote") ?: ""
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).glassCard(0.85f).padding(16.dp)) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Your Status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = theme.primary)
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { showMoodPicker = true }, modifier = Modifier.weight(1f)) {
+                    Text("Set Mood 😊", maxLines = 1)
+                }
+                OutlinedButton(onClick = { showNoteEditor = true }, modifier = Modifier.weight(1f)) {
+                    Text("Love Note ✏️", maxLines = 1)
+                }
+            }
+        }
+    }
+
+    // Mood picker dialog
+    if (showMoodPicker) {
+        Dialog(onDismissRequest = { showMoodPicker = false }) {
+            Box(modifier = Modifier.fillMaxWidth().glassCard(0.95f).padding(20.dp)) {
+                Column {
+                    Text("How are you feeling?", fontWeight = FontWeight.Bold, color = theme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LazyVerticalGrid(columns = GridCells.Fixed(3), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        items(moods, key = { it.first }) { pair ->
+                            val emoji = pair.first
+                            val label = pair.second
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable {
+                                if (uid.isNotEmpty()) {
+                                    db.collection("users").document(uid).update("mood", emoji)
+                                    Toast.makeText(context, "Mood set to $label", Toast.LENGTH_SHORT).show()
+                                }
+                                showMoodPicker = false
+                            }) {
+                                Text(emoji, fontSize = 36.sp)
+                                Text(label, fontSize = 11.sp, color = Color.DarkGray)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Love note editor dialog
+    if (showNoteEditor) {
+        Dialog(onDismissRequest = { showNoteEditor = false }) {
+            Box(modifier = Modifier.fillMaxWidth().glassCard(0.95f).padding(20.dp)) {
+                Column {
+                    Text("Leave a Love Note", fontWeight = FontWeight.Bold, color = theme.primary)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(value = noteDraft, onValueChange = { noteDraft = it }, label = { Text("Your note") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showNoteEditor = false }) { Text("Cancel") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = {
+                            if (uid.isNotEmpty() && noteDraft.isNotBlank()) {
+                                db.collection("users").document(uid).update("loveNote", noteDraft.trim())
+                                Toast.makeText(context, "Love note saved 💌", Toast.LENGTH_SHORT).show()
+                            }
+                            showNoteEditor = false
+                        }) { Text("Save") }
                     }
                 }
             }

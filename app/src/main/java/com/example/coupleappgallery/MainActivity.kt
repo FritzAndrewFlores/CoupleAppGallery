@@ -176,24 +176,37 @@ class MainActivity : ComponentActivity() {
 
     // --- GLOBAL NOTIFICATION LISTENER ---
     private fun startNotificationListener(userId: String) {
-        // Prevent duplicate listeners
         notificationListener?.remove()
-
+        Log.d("NotifListener", "Registering listener for userId=$userId")
         notificationListener = db.collection("notifications")
             .whereEqualTo("to", userId)
             .whereEqualTo("read", false)
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null) {
-                    snapshot.documents.forEach { doc ->
-                        val title = doc.getString("title") ?: "New Activity"
-                        val body = doc.getString("body") ?: "Check the app!"
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("NotifListener", "Listener error", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) {
+                    Log.w("NotifListener", "Snapshot was null")
+                    return@addSnapshotListener
+                }
+                Log.d("NotifListener", "Snapshot fired with ${snapshot.documents.size} unread docs")
 
-                        // Show System Notification with stable ID per document
-                        showSystemNotification(title, body, doc.id.hashCode())
+                snapshot.documents.forEach { doc ->
+                    val title = doc.getString("title") ?: "New Activity"
+                    val body = doc.getString("body") ?: "Check the app!"
+                    val docTo = doc.getString("to") ?: "?"
+                    Log.d("NotifListener", "Processing doc.id=${doc.id} to=$docTo title=$title")
 
-                        // Mark as read so this notification won't fire again
-                        db.collection("notifications").document(doc.id).update("read", true)
-                    }
+                    showSystemNotification(title, body, doc.id.hashCode())
+
+                    db.collection("notifications").document(doc.id).update("read", true)
+                        .addOnSuccessListener {
+                            Log.d("NotifListener", "Marked read=true for doc.id=${doc.id}")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e("NotifListener", "FAILED to mark read for doc.id=${doc.id}", e)
+                        }
                 }
             }
     }

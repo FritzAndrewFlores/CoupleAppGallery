@@ -10,9 +10,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
@@ -807,13 +809,98 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                     enter = scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn(),
                     exit = scaleOut(spring(dampingRatio = Spring.DampingRatioNoBouncy)) + fadeOut()
                 ) {
-                    val fabContentColor = if (primaryColor.luminance() > 0.6f) Color.Black else Color.White
-                    FloatingActionButton(
-                        onClick = { folderToEdit = null; showDialog = true },
-                        containerColor = primaryColor,
-                        contentColor = fabContentColor
+                    val isFabExpanded by remember { derivedStateOf { !albumsListState.isScrollInProgress } }
+                    val fabInteractionSource = remember { MutableInteractionSource() }
+                    val isPressed by fabInteractionSource.collectIsPressedAsState()
+                    val fabPressScale by animateFloatAsState(
+                        targetValue = if (isPressed) 0.90f else 1.0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "fabPressScale"
+                    )
+                    val fabPaddingHorizontal by animateDpAsState(
+                        targetValue = if (isFabExpanded) 16.dp else 14.dp,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+                        label = "fabPadding"
+                    )
+                    val fabContentColor = if (primaryColor.luminance() > 0.6f) Color(0xFF1E293B) else Color.White
+                    val fabBorderColor = if (currentTheme.id == "custom") Color.White.copy(alpha = 0.40f) else Color.White.copy(alpha = 0.35f)
+                    val fabGradient = Brush.linearGradient(
+                        listOf(
+                            primaryColor,
+                            currentTheme.secondary
+                        )
+                    )
+
+                    Surface(
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            folderToEdit = null
+                            showDialog = true
+                        },
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.Transparent,
+                        interactionSource = fabInteractionSource,
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = fabPressScale
+                                scaleY = fabPressScale
+                            }
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = RoundedCornerShape(24.dp),
+                                clip = false
+                            )
                     ) {
-                        Icon(Icons.Default.Add, "Add Folder")
+                        Box(
+                            modifier = Modifier
+                                .height(48.dp)
+                                .widthIn(min = 48.dp)
+                                .background(fabGradient)
+                                .border(1.dp, fabBorderColor, RoundedCornerShape(24.dp))
+                                .padding(horizontal = fabPaddingHorizontal),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "New Album",
+                                    tint = fabContentColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                AnimatedVisibility(
+                                    visible = isFabExpanded,
+                                    enter = fadeIn(animationSpec = tween(180)) + expandHorizontally(
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy)
+                                    ),
+                                    exit = fadeOut(animationSpec = tween(120)) + shrinkHorizontally(
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)
+                                    )
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "New Album",
+                                            fontFamily = FontFamily.Serif,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = fabContentColor,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = "✨",
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

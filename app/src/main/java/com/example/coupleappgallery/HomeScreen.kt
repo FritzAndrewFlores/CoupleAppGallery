@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import android.widget.Toast
 import androidx.annotation.Keep
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
@@ -13,6 +14,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -4090,11 +4092,38 @@ fun AlbumViewSwitcher(
     onModeSelected: (String) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
     val isCustom = currentTheme.id == "custom"
     val containerBg = if (isCustom) Color.Black.copy(alpha = 0.35f) else currentTheme.surface.copy(alpha = 0.9f)
-    val activeBg = currentTheme.primary
+    val pillGradient = Brush.horizontalGradient(
+        listOf(
+            currentTheme.primary,
+            currentTheme.secondary
+        )
+    )
     val activeText = if (currentTheme.primary.luminance() > 0.6f) Color.Black else Color.White
     val inactiveText = if (isCustom) Color.White.copy(alpha = 0.75f) else currentTheme.text.copy(alpha = 0.7f)
+
+    val isFilm = selectedMode == "filmstrip"
+    val indicatorProgress by animateFloatAsState(
+        targetValue = if (isFilm) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "albumSwitcherProgress"
+    )
+
+    val polaroidTextColor by animateColorAsState(
+        targetValue = if (!isFilm) activeText else inactiveText,
+        animationSpec = tween(220),
+        label = "polaroidTextColor"
+    )
+    val filmTextColor by animateColorAsState(
+        targetValue = if (isFilm) activeText else inactiveText,
+        animationSpec = tween(220),
+        label = "filmTextColor"
+    )
 
     Row(
         modifier = Modifier
@@ -4103,58 +4132,98 @@ fun AlbumViewSwitcher(
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
+                .width(220.dp)
+                .height(34.dp)
+                .clip(RoundedCornerShape(17.dp))
                 .background(containerBg)
-                .border(1.dp, if (isCustom) Color.White.copy(alpha = 0.2f) else currentTheme.primary.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .border(
+                    1.dp,
+                    if (isCustom) Color.White.copy(alpha = 0.2f) else currentTheme.primary.copy(alpha = 0.15f),
+                    RoundedCornerShape(17.dp)
+                )
+                .padding(2.5.dp)
         ) {
-            val isPolaroid = selectedMode == "polaroid"
-            val polaroidBg by animateColorAsState(if (isPolaroid) activeBg else Color.Transparent, label = "polaroidBg")
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(polaroidBg)
-                    .clickable {
-                        if (selectedMode != "polaroid") {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onModeSelected("polaroid")
-                        }
-                    }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "📸 Polaroid",
-                    fontSize = 11.sp,
-                    fontWeight = if (isPolaroid) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isPolaroid) activeText else inactiveText
-                )
-            }
+            val totalWidthPx = constraints.maxWidth.toFloat()
+            val segmentWidthPx = totalWidthPx / 2f
+            val segmentWidthDp = with(density) { segmentWidthPx.toDp() }
 
-            val isFilm = selectedMode == "filmstrip"
-            val filmBg by animateColorAsState(if (isFilm) activeBg else Color.Transparent, label = "filmBg")
+            // Sliding Active Pill Indicator (RenderNode GPU-accelerated translation)
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(filmBg)
-                    .clickable {
-                        if (selectedMode != "filmstrip") {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onModeSelected("filmstrip")
-                        }
+                    .graphicsLayer {
+                        translationX = indicatorProgress * segmentWidthPx
                     }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "🎞️ Film Strip",
-                    fontSize = 11.sp,
-                    fontWeight = if (isFilm) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isFilm) activeText else inactiveText
-                )
+                    .width(segmentWidthDp)
+                    .fillMaxHeight()
+                    .shadow(elevation = 2.dp, shape = RoundedCornerShape(14.dp), clip = false)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(pillGradient)
+            )
+
+            Row(modifier = Modifier.fillMaxSize()) {
+                // Option 0: Polaroid
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            if (isFilm) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onModeSelected("polaroid")
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val scale by animateFloatAsState(
+                        targetValue = if (!isFilm) 1.04f else 0.96f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                        label = "polaroidScale"
+                    )
+                    Text(
+                        text = "📸 Polaroid",
+                        fontSize = 11.5.sp,
+                        fontWeight = if (!isFilm) FontWeight.Bold else FontWeight.Medium,
+                        color = polaroidTextColor,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                    )
+                }
+
+                // Option 1: Film Strip
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            if (!isFilm) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onModeSelected("filmstrip")
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val scale by animateFloatAsState(
+                        targetValue = if (isFilm) 1.04f else 0.96f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                        label = "filmScale"
+                    )
+                    Text(
+                        text = "🎞️ Film Strip",
+                        fontSize = 11.5.sp,
+                        fontWeight = if (isFilm) FontWeight.Bold else FontWeight.Medium,
+                        color = filmTextColor,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                    )
+                }
             }
         }
     }
@@ -4611,24 +4680,37 @@ fun FolderItem(
     onEdit: () -> Unit,
     onClick: () -> Unit
 ) {
-    if (viewMode == "filmstrip") {
-        FilmStripFolderItem(
-            folder = folder,
-            index = index,
-            currentTheme = currentTheme,
-            onDelete = onDelete,
-            onEdit = onEdit,
-            onClick = onClick
-        )
-    } else {
-        PolaroidFolderItem(
-            folder = folder,
-            index = index,
-            currentTheme = currentTheme,
-            onDelete = onDelete,
-            onEdit = onEdit,
-            onClick = onClick
-        )
+    AnimatedContent(
+        targetState = viewMode,
+        transitionSpec = {
+            (fadeIn(animationSpec = tween(220, delayMillis = 30)) +
+                    scaleIn(initialScale = 0.95f, animationSpec = tween(220, delayMillis = 30)))
+                .togetherWith(
+                    fadeOut(animationSpec = tween(150)) +
+                            scaleOut(targetScale = 0.97f, animationSpec = tween(150))
+                )
+        },
+        label = "folderViewModeMorph"
+    ) { mode ->
+        if (mode == "filmstrip") {
+            FilmStripFolderItem(
+                folder = folder,
+                index = index,
+                currentTheme = currentTheme,
+                onDelete = onDelete,
+                onEdit = onEdit,
+                onClick = onClick
+            )
+        } else {
+            PolaroidFolderItem(
+                folder = folder,
+                index = index,
+                currentTheme = currentTheme,
+                onDelete = onDelete,
+                onEdit = onEdit,
+                onClick = onClick
+            )
+        }
     }
 }
 

@@ -1,0 +1,49 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidImageUpload() {
+      return request.resource.size < 15 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Profile pictures & avatars
+    match /avatars/{fileName} {
+      allow read, delete: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidImageUpload();
+    }
+    match /profile_pics/{fileName} {
+      allow read, delete: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidImageUpload();
+    }
+
+    // Theme wallpapers: authenticated users read/write/delete
+    match /theme_wallpapers/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidImageUpload();
+      allow delete: if isSignedIn();
+    }
+
+    // Album photos (supports listAll() + upload + delete for authenticated users)
+    match /folders/{folderId}/{allFiles=**} {
+      allow read, delete: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidImageUpload();
+    }
+
+    // Special-day photos (supports listAll() + upload + delete for authenticated users)
+    match /special_days/{eventId}/{allFiles=**} {
+      allow read, delete: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidImageUpload();
+    }
+
+    // Special-day custom background images
+    match /event_bgs/{fileName} {
+      allow read, delete: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidImageUpload();
+    }
+  }
+}

@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,19 +22,17 @@ import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.delay
 
 @Composable
-fun SplashScreen(navController: NavController) {
+fun SplashScreen(
+    navController: NavController,
+    currentTheme: AppTheme = DefaultAppTheme
+) {
     val scale = remember { Animatable(0f) }
-    val auth = FirebaseAuth.getInstance()
+    val auth = remember { FirebaseAuth.getInstance() }
 
-    // 🎨 Use Default Theme (Forest Green) for Splash
-    // Since we haven't loaded the user's preference from DB yet
-    val defaultTheme = appThemes["forest_green"]!!
-    val primaryColor = defaultTheme.primary
-    val backgroundColor = defaultTheme.background
+    val primaryColor = currentTheme.primary
+    val backgroundColor = currentTheme.background
 
-    // Animation Effect
     LaunchedEffect(Unit) {
-        // 1. Animate the Heart (Pop effect)
         scale.animateTo(
             targetValue = 1f,
             animationSpec = tween(
@@ -44,22 +41,18 @@ fun SplashScreen(navController: NavController) {
             )
         )
 
-        // 2. Wait for 2 seconds
-        delay(2000L)
+        delay(900L)
 
-        // 3. Decide where to go (Login vs Home)
-        if (auth.currentUser != null) {
-            navController.navigate("home") {
-                popUpTo("splash") { inclusive = true } // Remove splash from back history
-            }
-        } else {
-            navController.navigate("login") {
+        // Guard against detached NavController after config change
+        if (navController.currentBackStackEntry?.destination?.route == "splash") {
+            val destination = if (auth.currentUser != null) "home" else "login"
+            navController.navigate(destination) {
                 popUpTo("splash") { inclusive = true }
+                launchSingleTop = true
             }
         }
     }
 
-    // UI Design
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -67,7 +60,6 @@ fun SplashScreen(navController: NavController) {
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // THE HEART ICON 💚
             Icon(
                 imageVector = Icons.Default.Favorite,
                 contentDescription = "Logo",
@@ -80,7 +72,7 @@ fun SplashScreen(navController: NavController) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Couple Gallery",
+                text = "Couple Sync",
                 color = primaryColor,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,

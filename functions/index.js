@@ -4,7 +4,6 @@ const admin = require("firebase-admin");
 admin.initializeApp();
 
 exports.sendPushNotification = onDocumentCreated("notifications/{docId}", async (event) => {
-    // Get the newly created document
     const snap = event.data;
     if (!snap) {
         return null;
@@ -12,18 +11,20 @@ exports.sendPushNotification = onDocumentCreated("notifications/{docId}", async 
 
     const notificationData = snap.data();
     const receiverId = notificationData.to;
-    const title = notificationData.title || "New Update";
-    const body = notificationData.body || "Open the app to see!";
+    const rawTitle = notificationData.title || "New Update";
+    const rawBody = notificationData.body || "Open the app to see!";
+    const title = rawTitle.length > 120 ? rawTitle.slice(0, 117) + "..." : rawTitle;
+    const body = rawBody.length > 500 ? rawBody.slice(0, 497) + "..." : rawBody;
 
-    // 1. Check if we have a receiver
     if (!receiverId) {
         console.log("No receiverId found, aborting.");
         return null;
     }
 
+    const userRef = admin.firestore().collection("users").doc(receiverId);
+
     try {
-        // 2. Look up the receiver's FCM Token in the 'users' collection
-        const userDoc = await admin.firestore().collection("users").doc(receiverId).get();
+        const userDoc = await userRef.get();
 
         if (!userDoc.exists) {
             console.log(`User ${receiverId} does not exist.`);
@@ -37,22 +38,46 @@ exports.sendPushNotification = onDocumentCreated("notifications/{docId}", async 
             return null;
         }
 
-        // 3. Construct the Push Notification Payload
+        const lowerTitle = title.toLowerCase();
+        const route = lowerTitle.includes("message") || title.includes("💌") || lowerTitle.includes("chat") || lowerTitle.includes("new reaction")
+            ? "chat"
+            : "home";
+
         const payload = {
             notification: {
                 title: title,
                 body: body,
             },
-            token: fcmToken
+            android: {
+                priority: "high",
+                notification: {
+                    channelId: "COUPLE_APP_CHANNEL",
+                    icon: "ic_stat_heart",
+                },
+            },
+            data: {
+                docId: event.params.docId || "",
+                title: title,
+                body: body,
+                route: route,
+            },
+            token: fcmToken,
         };
 
-        // 4. Send the Notification via Firebase Cloud Messaging
         const response = await admin.messaging().send(payload);
         console.log("Successfully sent push notification:", response);
         return response;
-
     } catch (error) {
-        console.error("Error sending push notification:", error);
+        if (
+            error &&
+            (error.code === "messaging/registration-token-not-registered" ||
+                error.code === "messaging/invalid-registration-token")
+        ) {
+            console.log(`Pruning stale FCM token for user ${receiverId}`);
+            await userRef.update({ fcmToken: admin.firestore.FieldValue.delete() }).catch(() => {});
+        } else {
+            console.error("Error sending push notification:", error);
+        }
         return null;
     }
 });

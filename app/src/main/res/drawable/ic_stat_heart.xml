@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!--
+        Pure white heart on transparent background.
+        android:fillColor is hardcoded white so the OS tinting pipeline
+        renders it correctly as a status-bar / notification icon.
+    -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,21.593c-5.63,-5.539 -11,-10.297 -11,-14.402
+            C1,3.399 3.397,2 6,2c1.997,0 4.035,1.152 6,3.981
+            C13.965,3.152 16.003,2 18,2
+            c2.603,0 5,1.399 5,5.191
+            C23,11.296 17.63,16.054 12,21.593z"/>
+</vector>

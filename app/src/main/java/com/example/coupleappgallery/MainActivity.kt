@@ -1,9 +1,7 @@
 package com.example.coupleappgallery
 
 import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -14,17 +12,21 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import coil.Coil
+import coil.ImageLoader
+import coil.memory.MemoryCache
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessaging
 
 // --- 1. THEME ENGINE ---
@@ -35,102 +37,183 @@ data class AppTheme(
     val background: Color = Color(0xFFF4F9F4),
     val surface: Color = Color.White,
     val text: Color = Color(0xFF4A3728),
-    val navBar: Color = Color(0xFF2E5948),
     val wallpaperUrl: String = ""
+)
+
+val DefaultAppTheme = AppTheme(
+    id = "forest_green",
+    primary = Color(0xFF2E5948),
+    secondary = Color(0xFF8FBC8F),
+    background = Color(0xFFF4F9F4),
+    surface = Color.White,
+    text = Color(0xFF4A3728)
 )
 
 // PASTEL & AESTHETIC THEME PRESETS
 val appThemes = mapOf(
-    "forest_green" to AppTheme("forest_green", Color(0xFF2E5948), Color(0xFF8FBC8F), Color(0xFFF4F9F4), Color.White, Color(0xFF4A3728), Color(0xFF2E5948)),
-    "glacier_ice" to AppTheme("glacier_ice", Color(0xFF5D8AA8), Color(0xFFA0C4E3), Color(0xFFF0F8FF), Color(0xFFEBF5FB), Color(0xFF2C3E50), Color(0xFF5D8AA8)),
-    "smoke_grey" to AppTheme("smoke_grey", Color(0xFF607D8B), Color(0xFFB0BEC5), Color(0xFFECEFF1), Color.White, Color(0xFF263238), Color(0xFF607D8B)),
-    "starry_night" to AppTheme("starry_night", Color(0xFF3949AB), Color(0xFF7986CB), Color(0xFFE8EAF6), Color.White, Color(0xFF1A237E), Color(0xFF303F9F)),
-    "autumn_falls" to AppTheme("autumn_falls", Color(0xFFD84315), Color(0xFFFF8A65), Color(0xFFFBE9E7), Color.White, Color(0xFF3E2723), Color(0xFFBF360C)),
-    "ocean_blue" to AppTheme("ocean_blue", Color(0xFF0277BD), Color(0xFF4FC3F7), Color(0xFFE1F5FE), Color.White, Color(0xFF01579B), Color(0xFF0277BD)),
-    "ruby_red" to AppTheme("ruby_red", Color(0xFFD32F2F), Color(0xFFE57373), Color(0xFFFFEBEE), Color.White, Color(0xFFB71C1C), Color(0xFFC62828)),
-    "skies_blue" to AppTheme("skies_blue", Color(0xFF42A5F5), Color(0xFF90CAF9), Color(0xFFE3F2FD), Color.White, Color(0xFF0D47A1), Color(0xFF1E88E5)),
-    "rainbow" to AppTheme("rainbow", Color(0xFFBA68C8), Color(0xFFE1BEE7), Color(0xFFF3E5F5), Color.White, Color(0xFF4A148C), Color(0xFF9C27B0)),
-    "white" to AppTheme("white", Color(0xFF757575), Color(0xFFBDBDBD), Color(0xFFFAFAFA), Color.White, Color.Black, Color(0xFF616161))
+    "forest_green" to DefaultAppTheme,
+    "glacier_ice" to AppTheme("glacier_ice", Color(0xFF5D8AA8), Color(0xFFA0C4E3), Color(0xFFF0F8FF), Color(0xFFEBF5FB), Color(0xFF2C3E50)),
+    "smoke_grey" to AppTheme("smoke_grey", Color(0xFF607D8B), Color(0xFFB0BEC5), Color(0xFFECEFF1), Color.White, Color(0xFF263238)),
+    "starry_night" to AppTheme("starry_night", Color(0xFF3949AB), Color(0xFF7986CB), Color(0xFFE8EAF6), Color.White, Color(0xFF1A237E)),
+    "autumn_falls" to AppTheme("autumn_falls", Color(0xFFD84315), Color(0xFFFF8A65), Color(0xFFFBE9E7), Color.White, Color(0xFF3E2723)),
+    "ocean_blue" to AppTheme("ocean_blue", Color(0xFF0277BD), Color(0xFF4FC3F7), Color(0xFFE1F5FE), Color.White, Color(0xFF01579B)),
+    "ruby_red" to AppTheme("ruby_red", Color(0xFFD32F2F), Color(0xFFE57373), Color(0xFFFFEBEE), Color.White, Color(0xFFB71C1C)),
+    "skies_blue" to AppTheme("skies_blue", Color(0xFF42A5F5), Color(0xFF90CAF9), Color(0xFFE3F2FD), Color.White, Color(0xFF0D47A1)),
+    "rainbow" to AppTheme("rainbow", Color(0xFFBA68C8), Color(0xFFE1BEE7), Color(0xFFF3E5F5), Color.White, Color(0xFF4A148C)),
+    "white" to AppTheme("white", Color(0xFF757575), Color(0xFFBDBDBD), Color(0xFFFAFAFA), Color.White, Color.Black)
 )
 
 class MainActivity : ComponentActivity() {
 
-    private var notificationListener: ListenerRegistration? = null
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    // Permission Launcher for Android 13+
+    // Pair(route, uniqueEventId) ensures repeat taps to the same route still trigger navigation
+    private var pendingRouteEvent by mutableStateOf<Pair<String, Long>?>(null)
+
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeRouteExtra(intent)
+    }
+
+    private fun consumeRouteExtra(intent: Intent?) {
+        val route = intent?.getStringExtra("route")
+        if (!route.isNullOrEmpty()) {
+            intent.removeExtra("route")
+            pendingRouteEvent = route to System.nanoTime()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         FirebaseApp.initializeApp(this)
 
-        // Ask for notification permission on launch
+        consumeRouteExtra(intent)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        createNotificationChannel()
+        NotificationChannels.ensureChannel(this)
+
+        // Initialize high-performance in-memory bitmap cache for seamless tab switching & zero flicker
+        val imageLoader = ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .crossfade(true)
+            .build()
+        Coil.setImageLoader(imageLoader)
 
         setContent {
             val navController = rememberNavController()
-            val userId = auth.currentUser?.uid
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentRoute = navBackStackEntry?.destination?.route
 
-            // Initialize process-scoped SessionCache for user + partner profile data
-            LaunchedEffect(userId) {
-                if (userId != null) SessionCache.init(userId) else SessionCache.clear()
+            DisposableEffect(currentRoute) {
+                NotificationForegroundTracker.activeRoute = currentRoute
+                onDispose { }
             }
 
-            // 2. STATE FOR CURRENT THEME
-            var currentTheme by remember { mutableStateOf(appThemes["forest_green"]!!) }
+            var userId by remember { mutableStateOf(auth.currentUser?.uid) }
+            DisposableEffect(Unit) {
+                val authListener = FirebaseAuth.AuthStateListener { fbAuth ->
+                    userId = fbAuth.currentUser?.uid
+                }
+                auth.addAuthStateListener(authListener)
+                onDispose { auth.removeAuthStateListener(authListener) }
+            }
 
-            // 3. LISTEN FOR THEME CHANGES & SET UP NOTIFICATIONS
-            DisposableEffect(userId) {
-                if (userId == null) return@DisposableEffect onDispose { }
-                val themeReg = db.collection("users").document(userId).addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null) {
-                        val themeId = snapshot.getString("themeId") ?: "forest_green"
-                        if (themeId == "custom") {
-                            // Load Custom Colors from DB
-                            val primary = Color(snapshot.getLong("themePrimary") ?: 0xFF2E5948)
-                            val secondary = Color(snapshot.getLong("themeSecondary") ?: 0xFF8FBC8F)
-                            val bg = Color(snapshot.getLong("themeBg") ?: 0xFFF4F9F4)
-                            val text = Color(snapshot.getLong("themeText") ?: 0xFF4A3728)
-                            val wall = snapshot.getString("themeWallpaper") ?: ""
-                            currentTheme = AppTheme("custom", primary, secondary, bg, Color.White, text, primary, wall)
-                        } else {
-                            // Load Preset
-                            currentTheme = appThemes[themeId] ?: appThemes["forest_green"]!!
+            // Initialize process-scoped SessionCache for user + partner profile & theme data
+            LaunchedEffect(userId) {
+                val uid = userId
+                if (uid != null) SessionCache.init(uid) else SessionCache.clear()
+            }
+
+            // Route to target screen on both cold-start (once past splash/login) and warm-start taps
+            LaunchedEffect(pendingRouteEvent, userId, currentRoute) {
+                val event = pendingRouteEvent ?: return@LaunchedEffect
+                val uid = userId ?: return@LaunchedEffect
+                if (uid.isNotEmpty() && currentRoute != null && currentRoute != "splash" && currentRoute != "login") {
+                    val targetRoute = event.first
+                    pendingRouteEvent = null
+                    if (currentRoute != targetRoute) {
+                        navController.navigate(targetRoute) {
+                            launchSingleTop = true
                         }
                     }
                 }
+            }
 
-                // START GLOBAL NOTIFICATION LISTENER (Foreground/Minimized)
-                startNotificationListener(userId)
+            // Derive active AppTheme from SessionCache (avoids a duplicate users/{uid} listener)
+            val currentTheme = remember(
+                userId,
+                SessionCache.themeId,
+                SessionCache.themePrimary,
+                SessionCache.themeSecondary,
+                SessionCache.themeBg,
+                SessionCache.themeText,
+                SessionCache.themeWallpaper
+            ) {
+                if (userId == null) {
+                    DefaultAppTheme
+                } else if (SessionCache.themeId == "custom") {
+                    val primary = Color(SessionCache.themePrimary)
+                    AppTheme(
+                        id = "custom",
+                        primary = primary,
+                        secondary = Color(SessionCache.themeSecondary),
+                        background = Color(SessionCache.themeBg),
+                        surface = Color.White,
+                        text = Color(SessionCache.themeText),
+                        wallpaperUrl = SessionCache.themeWallpaper
+                    )
+                } else {
+                    appThemes[SessionCache.themeId] ?: DefaultAppTheme
+                }
+            }
 
-                // GET AND SAVE FCM TOKEN (For completely closed app notifications) — one-shot, no cleanup
+            // Mark online, register notification listener, and sync FCM token whenever userId becomes active
+            DisposableEffect(userId) {
+                val uid = userId
+                if (uid == null) {
+                    return@DisposableEffect onDispose { }
+                }
+
+                // Mark user Online immediately on login/sign-up (not just Activity.onStart)
+                updateUserStatus("Online", uid)
+
+                val notifReg = createNotificationListener(uid)
+
                 FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                     if (!task.isSuccessful) {
                         Log.w("FCM", "Fetching FCM registration token failed", task.exception)
                         return@addOnCompleteListener
                     }
-                    // Get new FCM registration token
+                    if (auth.currentUser?.uid != uid) return@addOnCompleteListener
                     val token = task.result
-                    // Save token to Firestore user document
-                    db.collection("users").document(userId).update("fcmToken", token)
-                        .addOnSuccessListener { Log.d("FCM", "Token saved successfully: $token") }
+                    db.collection("users").document(uid)
+                        .set(mapOf("fcmToken" to token), SetOptions.merge())
+                        .addOnFailureListener { e ->
+                            Log.w("FCM", "Saving FCM token failed", e)
+                        }
                 }
-                onDispose { themeReg.remove() }
+
+                onDispose {
+                    notifReg.remove()
+                }
             }
 
             NavHost(navController = navController, startDestination = "splash") {
-                composable("splash") { SplashScreen(navController) }
+                composable("splash") { SplashScreen(navController, currentTheme) }
                 composable("login") { LoginScreen(navController) }
-
-                // PASS 'currentTheme' TO ALL SCREENS
                 composable("home") { HomeScreen(navController, currentTheme) }
 
                 composable(
@@ -143,20 +226,11 @@ class MainActivity : ComponentActivity() {
 
                 composable("chat") { ChatScreen(navController, currentTheme) }
                 composable("profile") { ProfileScreen(navController, currentTheme) }
-                composable("special_days") { SpecialDaysScreen(navController, currentTheme) }
-
-                composable(
-                    "special_day_detail/{eventId}",
-                    arguments = listOf(navArgument("eventId") { type = NavType.StringType })
-                ) { backStackEntry ->
-                    val eventId = backStackEntry.arguments?.getString("eventId") ?: ""
-                    SpecialDayDetailScreen(navController, eventId, currentTheme)
-                }
+                composable("settings") { SettingsScreen(navController, currentTheme) }
             }
         }
     }
 
-    // --- LIFECYCLE: ONLINE / OFFLINE LOGIC ---
     override fun onStart() {
         super.onStart()
         updateUserStatus("Online")
@@ -164,77 +238,66 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        NotificationForegroundTracker.activeRoute = null
         updateUserStatus("Offline")
     }
 
-    private fun updateUserStatus(status: String) {
-        val userId = auth.currentUser?.uid
-        if (userId != null) {
-            db.collection("users").document(userId).update("status", status)
-        }
+    private fun updateUserStatus(status: String, explicitUid: String? = null) {
+        val uid = explicitUid ?: auth.currentUser?.uid ?: return
+        db.collection("users").document(uid)
+            .set(mapOf("status" to status), SetOptions.merge())
+            .addOnFailureListener { e ->
+                Log.w("FS", "updateUserStatus($status) failed", e)
+            }
     }
 
-    // --- GLOBAL NOTIFICATION LISTENER ---
-    private fun startNotificationListener(userId: String) {
-        notificationListener?.remove()
-        Log.d("NotifListener", "Registering listener for userId=$userId")
-        notificationListener = db.collection("notifications")
-            .whereEqualTo("to", userId)
+    private fun createNotificationListener(uid: String): ListenerRegistration {
+        var isInitialSnapshot = true
+        return db.collection("notifications")
+            .whereEqualTo("to", uid)
             .whereEqualTo("read", false)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e("NotifListener", "Listener error", error)
                     return@addSnapshotListener
                 }
-                if (snapshot == null) {
-                    Log.w("NotifListener", "Snapshot was null")
+                if (snapshot == null) return@addSnapshotListener
+
+                val addedDocs = snapshot.documentChanges
+                    .filter { it.type == DocumentChange.Type.ADDED }
+                    .map { it.document }
+
+                if (addedDocs.isEmpty()) {
+                    isInitialSnapshot = false
                     return@addSnapshotListener
                 }
-                Log.d("NotifListener", "Snapshot fired with ${snapshot.documents.size} unread docs")
 
-                snapshot.documents.forEach { doc ->
-                    val title = doc.getString("title") ?: "New Activity"
-                    val body = doc.getString("body") ?: "Check the app!"
-                    val docTo = doc.getString("to") ?: "?"
-                    Log.d("NotifListener", "Processing doc.id=${doc.id} to=$docTo title=$title")
+                if (isInitialSnapshot && addedDocs.size > 3) {
+                    // Coalesce offline backlog into a single summary notification instead of spamming banners
+                    showSystemNotification(
+                        this@MainActivity,
+                        "Welcome back 💕",
+                        "You have ${addedDocs.size} new updates from your partner!",
+                        docId = "summary_${addedDocs.first().id}",
+                        route = "home"
+                    )
+                } else {
+                    addedDocs.forEach { doc ->
+                        val title = doc.getString("title") ?: "New Activity"
+                        val body = doc.getString("body") ?: "Check the app!"
+                        showSystemNotification(this@MainActivity, title, body, doc.id)
+                    }
+                }
+                isInitialSnapshot = false
 
-                    showSystemNotification(title, body, doc.id.hashCode())
-
-                    db.collection("notifications").document(doc.id).update("read", true)
-                        .addOnSuccessListener {
-                            Log.d("NotifListener", "Marked read=true for doc.id=${doc.id}")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("NotifListener", "FAILED to mark read for doc.id=${doc.id}", e)
-                        }
+                // Mark unread notifications read in safe 450-op batches
+                addedDocs.chunked(450).forEach { chunk ->
+                    val batch = db.batch()
+                    chunk.forEach { doc -> batch.update(doc.reference, "read", true) }
+                    batch.commit().addOnFailureListener { e ->
+                        Log.e("NotifListener", "Failed to mark notifications read", e)
+                    }
                 }
             }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "CoupleAppUpdates"
-            val descriptionText = "Messages and Updates"
-            val importance = NotificationManager.IMPORTANCE_HIGH
-            val channel = NotificationChannel("COUPLE_APP_CHANNEL", name, importance).apply {
-                description = descriptionText
-            }
-            val notificationManager: NotificationManager =
-                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun showSystemNotification(title: String, content: String, id: Int) {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-            val builder = NotificationCompat.Builder(this, "COUPLE_APP_CHANNEL")
-                .setSmallIcon(android.R.drawable.ic_dialog_email) // Replace with your app icon
-                .setContentTitle(title)
-                .setContentText(content)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-
-            NotificationManagerCompat.from(this).notify(id, builder.build())
-        }
     }
 }

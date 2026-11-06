@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.coupleappgallery"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -49,7 +49,7 @@ android {
 }
 
 dependencies {
-    // --- YOUR DEFAULT DEPENDENCIES (KEEP THESE) ---
+    // Core & Compose (managed via Compose BOM)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -58,8 +58,26 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation("androidx.compose.material:material-icons-extended")
 
-    // Testing (Default)
+    // Navigation & Image Loading
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+    // Firebase (managed via Firebase BOM)
+    implementation(platform("com.google.firebase:firebase-bom:32.8.0"))
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-storage")
+    implementation("com.google.firebase:firebase-messaging")
+
+    // Google Sign-In via Credential Manager
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+
+    // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -67,25 +85,4 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
-
-    // --- NEW ADDITIONS FOR COUPLE APP ---
-
-    // 1. Navigation (To switch between Home, Gallery, Calendar)
-    implementation("androidx.navigation:navigation-compose:2.7.7")
-
-    // 2. Coil (To load photos from the internet/Firebase)
-    implementation("io.coil-kt:coil-compose:2.6.0")
-
-    // 3. Extended Icons (For the "Cute Icons" like Hearts, Planes, etc.)
-    implementation("androidx.compose.material:material-icons-extended:1.6.3")
-
-    // 4. Firebase (The Backend for Chat, Database, and Storage)
-    implementation(platform("com.google.firebase:firebase-bom:32.8.0")) // Manages versions
-    implementation("com.google.firebase:firebase-analytics")
-    implementation("com.google.firebase:firebase-firestore") // Database
-    implementation("com.google.firebase:firebase-auth")      // Login
-    implementation("com.google.firebase:firebase-storage")   // Photo Uploads
-    implementation("androidx.activity:activity-compose:1.8.2")
-    // Add this line with your other Firebase dependencies
-    implementation("com.google.firebase:firebase-messaging-ktx")
 }

@@ -12,4 +12,12 @@
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+.kotlin/
+.claude/
+.firebase/
+*-debug.log
+*.zip
+*.jks
+*.keystore
+.gemini/
+.agy/

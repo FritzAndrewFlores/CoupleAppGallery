@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -122,32 +123,35 @@ fun calculateBubblePosition(
     }
 }
 
+private val chatTimeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
+private val chatFullDateFormatter = SimpleDateFormat("EEEE, MMM d • h:mm a", Locale.getDefault())
+private val chatHeaderDateCache = mutableMapOf<Long, String>()
+
 fun shouldShowDateHeader(prevTimestamp: Long, currentTimestamp: Long): Boolean {
     if (prevTimestamp == 0L) return true
     return (currentTimestamp - prevTimestamp) > 20 * 60 * 1000L
 }
 
 fun formatChatDateHeader(timestamp: Long): String {
-    val messageCal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val nowCal = Calendar.getInstance()
+    return chatHeaderDateCache.getOrPut(timestamp) {
+        val messageCal = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val nowCal = Calendar.getInstance()
 
-    val sameDay = messageCal.get(Calendar.YEAR) == nowCal.get(Calendar.YEAR) &&
-            messageCal.get(Calendar.DAY_OF_YEAR) == nowCal.get(Calendar.DAY_OF_YEAR)
-    if (sameDay) {
-        val timeFmt = SimpleDateFormat("h:mm a", Locale.getDefault())
-        return "Today ${timeFmt.format(Date(timestamp))}"
+        val sameDay = messageCal.get(Calendar.YEAR) == nowCal.get(Calendar.YEAR) &&
+                messageCal.get(Calendar.DAY_OF_YEAR) == nowCal.get(Calendar.DAY_OF_YEAR)
+        if (sameDay) {
+            "Today ${chatTimeFormatter.format(Date(timestamp))}"
+        } else {
+            val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+            val isYesterday = messageCal.get(Calendar.YEAR) == yesterdayCal.get(Calendar.YEAR) &&
+                    messageCal.get(Calendar.DAY_OF_YEAR) == yesterdayCal.get(Calendar.DAY_OF_YEAR)
+            if (isYesterday) {
+                "Yesterday ${chatTimeFormatter.format(Date(timestamp))}"
+            } else {
+                chatFullDateFormatter.format(Date(timestamp))
+            }
+        }
     }
-
-    val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-    val isYesterday = messageCal.get(Calendar.YEAR) == yesterdayCal.get(Calendar.YEAR) &&
-            messageCal.get(Calendar.DAY_OF_YEAR) == yesterdayCal.get(Calendar.DAY_OF_YEAR)
-    if (isYesterday) {
-        val timeFmt = SimpleDateFormat("h:mm a", Locale.getDefault())
-        return "Yesterday ${timeFmt.format(Date(timestamp))}"
-    }
-
-    val dateFmt = SimpleDateFormat("EEEE, MMM d • h:mm a", Locale.getDefault())
-    return dateFmt.format(Date(timestamp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -1079,8 +1083,11 @@ fun CupertinoSwipeableMessageItem(
                     .align(Alignment.CenterStart)
                     .padding(start = 8.dp)
                     .size(32.dp)
-                    .scale((animatedSwipeOffset / 48f).coerceIn(0.4f, 1.15f))
-                    .alpha((animatedSwipeOffset / 38f).coerceIn(0f, 1f))
+                    .graphicsLayer(
+                        scaleX = (animatedSwipeOffset / 48f).coerceIn(0.4f, 1.15f),
+                        scaleY = (animatedSwipeOffset / 48f).coerceIn(0.4f, 1.15f),
+                        alpha = (animatedSwipeOffset / 38f).coerceIn(0f, 1f)
+                    )
                     .clip(CircleShape)
                     .background(primaryColor.copy(alpha = 0.85f)),
                 contentAlignment = Alignment.Center

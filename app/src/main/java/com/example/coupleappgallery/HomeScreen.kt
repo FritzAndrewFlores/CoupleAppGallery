@@ -693,7 +693,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                                     Box(
                                         modifier = Modifier
                                             .size(8.dp)
-                                            .alpha(if (isOnline) pulseAlpha else 1f)
+                                            .graphicsLayer(alpha = if (isOnline) pulseAlpha else 1f)
                                             .background(statusColor, CircleShape)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -1668,10 +1668,11 @@ fun BentoMoodTile(
                 if (partnerId.isNotEmpty() && mood.isNotEmpty()) {
                     Box(contentAlignment = Alignment.Center) {
                         // Ambient breathing glow halo
+                        val localDensity = LocalDensity.current
                         Box(
                             modifier = Modifier
                                 .size(68.dp)
-                                .scale(glowScale)
+                                .graphicsLayer(scaleX = glowScale, scaleY = glowScale)
                                 .clip(CircleShape)
                                 .background(
                                     if (bg.darkText) Color.Black.copy(alpha = 0.06f)
@@ -1681,7 +1682,7 @@ fun BentoMoodTile(
                         Text(
                             text = mood,
                             fontSize = 44.sp,
-                            modifier = Modifier.offset(y = floatOffset.dp)
+                            modifier = Modifier.graphicsLayer(translationY = with(localDensity) { floatOffset.dp.toPx() })
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -3026,7 +3027,7 @@ fun AnniversaryHeroBanner(
                     Text(
                         text = "💖",
                         fontSize = 28.sp,
-                        modifier = Modifier.scale(heartScale)
+                        modifier = Modifier.graphicsLayer(scaleX = heartScale, scaleY = heartScale)
                     )
                 }
 

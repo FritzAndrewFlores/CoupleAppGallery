@@ -849,13 +849,17 @@ fun PlanSection(folderId: String, currentTheme: AppTheme, partnerId: String, myN
 // ---------------------------------------------------------
 @Composable
 fun GalleryItem(image: GalleryImage, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val imageRequest = remember(image.id, image.url) {
+        buildImageRequest(context, image.url, cacheKey = "gallery_${image.id}")
+    }
     Card(
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(2.dp),
         modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onClick() }
     ) {
         AsyncImage(
-            model = buildImageRequest(LocalContext.current, image.url, cacheKey = "gallery_${image.id}"),
+            model = imageRequest,
             contentDescription = "Memory",
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()

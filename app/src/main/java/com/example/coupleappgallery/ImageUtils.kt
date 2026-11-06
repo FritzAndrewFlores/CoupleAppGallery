@@ -249,21 +249,82 @@ suspend fun compressToBase64DataUri(
     DATA_URI_PREFIX + encodeBase64Safe(bytes)
 }
 
+// ============================================================================
+// HIGH-PERFORMANCE IN-MEMORY DECODED BYTE CACHE
+// ============================================================================
+
+/**
+ * High-performance thread-safe LRU cache for decoded Base64 image byte arrays.
+ * Prevents redundant CPU-heavy Base64 string decoding and massive garbage collection
+ * during fast scrolling in LazyColumn and LazyVerticalGrid.
+ * Built with LinkedHashMap so it runs seamlessly on both Android runtime and JVM unit tests.
+ */
+object Base64ByteCache {
+    private val maxBytes: Long = (Runtime.getRuntime().maxMemory() / 8).coerceAtLeast(16L * 1024 * 1024)
+    private var currentBytes: Long = 0L
+
+    private val lock = Any()
+    private val map = object : LinkedHashMap<String, ByteArray>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean {
+            return currentBytes > maxBytes
+        }
+    }
+
+    fun get(key: String): ByteArray? {
+        synchronized(lock) {
+            return map[key]
+        }
+    }
+
+    fun put(key: String, bytes: ByteArray) {
+        synchronized(lock) {
+            val old = map.put(key, bytes)
+            if (old != null) {
+                currentBytes -= old.size
+            }
+            currentBytes += bytes.size
+            while (currentBytes > maxBytes && map.isNotEmpty()) {
+                val iterator = map.entries.iterator()
+                if (iterator.hasNext()) {
+                    val entry = iterator.next()
+                    currentBytes -= entry.value.size
+                    iterator.remove()
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
+    fun clear() {
+        synchronized(lock) {
+            map.clear()
+            currentBytes = 0L
+        }
+    }
+}
+
 /**
  * Resolves an image model for Coil [coil.compose.AsyncImage] or [coil.request.ImageRequest].
  * If [model] is a Base64 Data URI (`data:image/...;base64,...`) or raw Base64 string,
- * it decodes it to [ByteArray], which Coil natively renders without network calls.
+ * it checks [Base64ByteCache] first for an instant O(1) hit before decoding to [ByteArray].
  * If [model] is a network URL or Uri, it returns it directly for backwards compatibility.
  */
-fun resolveImageModel(model: Any?): Any? {
+fun resolveImageModel(model: Any?, explicitKey: String? = null): Any? {
     if (model == null) return null
     if (model is String) {
         if (model.isBlank()) return null
         if (model.startsWith("data:")) {
+            val cacheKey = explicitKey ?: "b64_${model.length}_${model.take(48).hashCode()}"
+            val cached = Base64ByteCache.get(cacheKey)
+            if (cached != null) return cached
+
             val commaIndex = model.indexOf(',')
             val base64Data = if (commaIndex != -1) model.substring(commaIndex + 1) else model
             return try {
-                decodeBase64Safe(base64Data)
+                val decoded = decodeBase64Safe(base64Data)
+                Base64ByteCache.put(cacheKey, decoded)
+                decoded
             } catch (e: Exception) {
                 Log.w("ImageUtils", "Failed to decode base64 data URI", e)
                 model
@@ -274,8 +335,14 @@ fun resolveImageModel(model: Any?): Any? {
             !model.startsWith("content://") && !model.startsWith("file://") &&
             !model.startsWith("android.resource://") && model.length > 100
         ) {
+            val cacheKey = explicitKey ?: "raw_${model.length}_${model.take(48).hashCode()}"
+            val cached = Base64ByteCache.get(cacheKey)
+            if (cached != null) return cached
+
             return try {
-                decodeBase64Safe(model)
+                val decoded = decodeBase64Safe(model)
+                Base64ByteCache.put(cacheKey, decoded)
+                decoded
             } catch (_: Exception) {
                 model
             }
@@ -285,25 +352,25 @@ fun resolveImageModel(model: Any?): Any? {
 }
 
 /**
- * Creates an optimized [ImageRequest] configured with memory caching for Base64 Data URIs and URLs.
+ * Creates an optimized [ImageRequest] configured with memory and disk caching for Base64 Data URIs and URLs.
  * If [cacheKey] is provided, it is used for explicit deterministic memory/disk cache lookups.
  */
 fun buildImageRequest(context: Context, model: Any?, cacheKey: String? = null): ImageRequest? {
     if (model == null) return null
-    val resolved = resolveImageModel(model) ?: return null
+    val effectiveKey = cacheKey ?: when {
+        model is String && model.startsWith("data:") ->
+            "b64_${model.length}_${model.take(48).hashCode()}"
+        model is String && model.isNotEmpty() ->
+            "str_${model.hashCode()}"
+        else -> null
+    }
+    val resolved = resolveImageModel(model, effectiveKey) ?: return null
     return ImageRequest.Builder(context)
         .data(resolved)
         .apply {
-            val key = cacheKey ?: when {
-                model is String && model.startsWith("data:") ->
-                    "b64_${model.length}_${model.take(64).hashCode()}"
-                model is String && model.isNotEmpty() ->
-                    "str_${model.hashCode()}"
-                else -> null
-            }
-            if (key != null) {
-                memoryCacheKey(key)
-                diskCacheKey(key)
+            if (effectiveKey != null) {
+                memoryCacheKey(effectiveKey)
+                diskCacheKey(effectiveKey)
             }
         }
         .crossfade(true)

@@ -20,12 +20,15 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import coil.Coil
 import coil.ImageLoader
+import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.PersistentCacheSettings
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessaging
 
@@ -101,16 +104,34 @@ class MainActivity : ComponentActivity() {
         }
         NotificationChannels.ensureChannel(this)
 
-        // Initialize high-performance in-memory bitmap cache for seamless tab switching & zero flicker
+        // Initialize high-performance dual-tier in-memory & persistent disk cache for Coil
         val imageLoader = ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.25)
                     .build()
             }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(100L * 1024 * 1024)
+                    .build()
+            }
             .crossfade(true)
             .build()
         Coil.setImageLoader(imageLoader)
+
+        // Initialize Firestore high-performance offline persistent cache
+        runCatching {
+            val firestoreSettings = FirebaseFirestoreSettings.Builder()
+                .setLocalCacheSettings(
+                    PersistentCacheSettings.newBuilder()
+                        .setSizeBytes(100L * 1024 * 1024)
+                        .build()
+                )
+                .build()
+            db.firestoreSettings = firestoreSettings
+        }
 
         setContent {
             val navController = rememberNavController()

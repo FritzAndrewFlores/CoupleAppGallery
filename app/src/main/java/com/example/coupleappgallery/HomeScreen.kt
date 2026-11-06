@@ -361,13 +361,13 @@ fun FloatingFrostedCapsuleTabBar(
             val tabWidthPx = totalWidthPx / 2f
             val tabWidthDp = with(density) { tabWidthPx.toDp() }
 
-            val fraction = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-            val indicatorOffsetDp = with(density) { (fraction * tabWidthPx).toDp() }
-
-            // Sliding Active Pill Indicator
+            // Sliding Active Pill Indicator (RenderNode GPU-accelerated translation, 0 recomposition)
             Box(
                 modifier = Modifier
-                    .offset(x = indicatorOffsetDp)
+                    .graphicsLayer {
+                        val fraction = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                        translationX = fraction * tabWidthPx
+                    }
                     .width(tabWidthDp)
                     .fillMaxHeight()
                     .shadow(elevation = 3.dp, shape = RoundedCornerShape(20.dp), clip = false)
@@ -391,8 +391,6 @@ fun FloatingFrostedCapsuleTabBar(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    val activeWeight = (1f - fraction).coerceIn(0f, 1f)
-                    val textColor = if (activeWeight > 0.5f) pillTextColor else inactiveTextColor
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
@@ -401,18 +399,39 @@ fun FloatingFrostedCapsuleTabBar(
                             text = "📸",
                             fontSize = 14.sp,
                             modifier = Modifier.graphicsLayer {
-                                scaleX = 0.95f + activeWeight * 0.12f
-                                scaleY = 0.95f + activeWeight * 0.12f
+                                val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                val weight = (1f - f).coerceIn(0f, 1f)
+                                scaleX = 0.95f + weight * 0.12f
+                                scaleY = 0.95f + weight * 0.12f
                             }
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Albums",
-                            fontFamily = FontFamily.Serif,
-                            fontSize = 13.5.sp,
-                            fontWeight = if (activeWeight > 0.5f) FontWeight.Bold else FontWeight.Medium,
-                            color = textColor
-                        )
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            Text(
+                                text = "Albums",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = inactiveTextColor,
+                                modifier = Modifier.graphicsLayer {
+                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                    val weight = (1f - f).coerceIn(0f, 1f)
+                                    this.alpha = (1f - weight).coerceIn(0f, 1f)
+                                }
+                            )
+                            Text(
+                                text = "Albums",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = pillTextColor,
+                                modifier = Modifier.graphicsLayer {
+                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                    val weight = (1f - f).coerceIn(0f, 1f)
+                                    this.alpha = weight.coerceIn(0f, 1f)
+                                }
+                            )
+                        }
                     }
                 }
 
@@ -428,8 +447,6 @@ fun FloatingFrostedCapsuleTabBar(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    val activeWeight = fraction.coerceIn(0f, 1f)
-                    val textColor = if (activeWeight > 0.5f) pillTextColor else inactiveTextColor
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
@@ -438,18 +455,39 @@ fun FloatingFrostedCapsuleTabBar(
                             text = "💌",
                             fontSize = 14.sp,
                             modifier = Modifier.graphicsLayer {
-                                scaleX = 0.95f + activeWeight * 0.12f
-                                scaleY = 0.95f + activeWeight * 0.12f
+                                val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                val weight = f.coerceIn(0f, 1f)
+                                scaleX = 0.95f + weight * 0.12f
+                                scaleY = 0.95f + weight * 0.12f
                             }
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Together",
-                            fontFamily = FontFamily.Serif,
-                            fontSize = 13.5.sp,
-                            fontWeight = if (activeWeight > 0.5f) FontWeight.Bold else FontWeight.Medium,
-                            color = textColor
-                        )
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            Text(
+                                text = "Together",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = inactiveTextColor,
+                                modifier = Modifier.graphicsLayer {
+                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                    val weight = f.coerceIn(0f, 1f)
+                                    this.alpha = (1f - weight).coerceIn(0f, 1f)
+                                }
+                            )
+                            Text(
+                                text = "Together",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = pillTextColor,
+                                modifier = Modifier.graphicsLayer {
+                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                                    val weight = f.coerceIn(0f, 1f)
+                                    this.alpha = weight.coerceIn(0f, 1f)
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -476,7 +514,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
     var showHistorySheet by remember { mutableStateOf(false) }
 
     val hapticFeedback = LocalHapticFeedback.current
-    LaunchedEffect(pagerState.currentPage) {
+    LaunchedEffect(pagerState.settledPage) {
         hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
@@ -693,7 +731,9 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                                     Box(
                                         modifier = Modifier
                                             .size(8.dp)
-                                            .graphicsLayer(alpha = if (isOnline) pulseAlpha else 1f)
+                                            .graphicsLayer {
+                                                this.alpha = if (isOnline) pulseAlpha else 1f
+                                            }
                                             .background(statusColor, CircleShape)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -777,6 +817,8 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 HorizontalPager(
                     state = pagerState,
+                    beyondViewportPageCount = 1,
+                    key = { page -> page },
                     userScrollEnabled = (activeDragCard == null),
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
@@ -1672,7 +1714,10 @@ fun BentoMoodTile(
                         Box(
                             modifier = Modifier
                                 .size(68.dp)
-                                .graphicsLayer(scaleX = glowScale, scaleY = glowScale)
+                                .graphicsLayer {
+                                    scaleX = glowScale
+                                    scaleY = glowScale
+                                }
                                 .clip(CircleShape)
                                 .background(
                                     if (bg.darkText) Color.Black.copy(alpha = 0.06f)
@@ -1682,7 +1727,9 @@ fun BentoMoodTile(
                         Text(
                             text = mood,
                             fontSize = 44.sp,
-                            modifier = Modifier.graphicsLayer(translationY = with(localDensity) { floatOffset.dp.toPx() })
+                            modifier = Modifier.graphicsLayer {
+                                translationY = with(localDensity) { floatOffset.dp.toPx() }
+                            }
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -3027,7 +3074,10 @@ fun AnniversaryHeroBanner(
                     Text(
                         text = "💖",
                         fontSize = 28.sp,
-                        modifier = Modifier.graphicsLayer(scaleX = heartScale, scaleY = heartScale)
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = heartScale
+                            scaleY = heartScale
+                        }
                     )
                 }
 

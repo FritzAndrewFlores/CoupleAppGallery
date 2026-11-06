@@ -343,6 +343,47 @@ fun FloatingFrostedCapsuleTabBar(
     val pillTextColor = if (currentTheme.primary.luminance() > 0.6f) Color(0xFF1E293B) else Color.White
     val inactiveTextColor = if (isCustom) Color.White.copy(alpha = 0.70f) else currentTheme.text.copy(alpha = 0.65f)
 
+    val isTogether = pagerState.currentPage == 1
+    val isDragging = pagerState.isScrollInProgress
+
+    // Spring bouncy progress for indicator pill (smooth drag tracking + bouncy overshoot on tap/release)
+    val animatedProgress by animateFloatAsState(
+        targetValue = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f),
+        animationSpec = if (isDragging) {
+            spring(stiffness = Spring.StiffnessHigh)
+        } else {
+            spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        },
+        label = "tabBarPillProgress"
+    )
+
+    // Bouncy scale for tab icons and text (matching the Polaroid/Filmstrip effect)
+    val albumsScale by animateFloatAsState(
+        targetValue = if (!isTogether) 1.05f else 0.95f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "albumsScale"
+    )
+    val togetherScale by animateFloatAsState(
+        targetValue = if (isTogether) 1.05f else 0.95f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "togetherScale"
+    )
+
+    // Smooth color crossfade
+    val albumsTextColor by animateColorAsState(
+        targetValue = if (!isTogether) pillTextColor else inactiveTextColor,
+        animationSpec = tween(220),
+        label = "albumsTextColor"
+    )
+    val togetherTextColor by animateColorAsState(
+        targetValue = if (isTogether) pillTextColor else inactiveTextColor,
+        animationSpec = tween(220),
+        label = "togetherTextColor"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -363,12 +404,11 @@ fun FloatingFrostedCapsuleTabBar(
             val tabWidthPx = totalWidthPx / 2f
             val tabWidthDp = with(density) { tabWidthPx.toDp() }
 
-            // Sliding Active Pill Indicator (RenderNode GPU-accelerated translation, 0 recomposition)
+            // Sliding Active Pill Indicator (RenderNode GPU-accelerated spring-bouncy translation)
             Box(
                 modifier = Modifier
                     .graphicsLayer {
-                        val fraction = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                        translationX = fraction * tabWidthPx
+                        translationX = animatedProgress * tabWidthPx
                     }
                     .width(tabWidthDp)
                     .fillMaxHeight()
@@ -388,52 +428,33 @@ fun FloatingFrostedCapsuleTabBar(
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(20.dp))
                         .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onTabSelected(0)
+                            if (isTogether) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onTabSelected(0)
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = albumsScale
+                            scaleY = albumsScale
+                        }
                     ) {
                         Text(
                             text = "📸",
-                            fontSize = 14.sp,
-                            modifier = Modifier.graphicsLayer {
-                                val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                val weight = (1f - f).coerceIn(0f, 1f)
-                                scaleX = 0.95f + weight * 0.12f
-                                scaleY = 0.95f + weight * 0.12f
-                            }
+                            fontSize = 14.sp
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            Text(
-                                text = "Albums",
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = inactiveTextColor,
-                                modifier = Modifier.graphicsLayer {
-                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                    val weight = (1f - f).coerceIn(0f, 1f)
-                                    this.alpha = (1f - weight).coerceIn(0f, 1f)
-                                }
-                            )
-                            Text(
-                                text = "Albums",
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = pillTextColor,
-                                modifier = Modifier.graphicsLayer {
-                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                    val weight = (1f - f).coerceIn(0f, 1f)
-                                    this.alpha = weight.coerceIn(0f, 1f)
-                                }
-                            )
-                        }
+                        Text(
+                            text = "Albums",
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 13.5.sp,
+                            fontWeight = if (!isTogether) FontWeight.Bold else FontWeight.Medium,
+                            color = albumsTextColor
+                        )
                     }
                 }
 
@@ -444,52 +465,33 @@ fun FloatingFrostedCapsuleTabBar(
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(20.dp))
                         .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onTabSelected(1)
+                            if (!isTogether) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onTabSelected(1)
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = togetherScale
+                            scaleY = togetherScale
+                        }
                     ) {
                         Text(
                             text = "💌",
-                            fontSize = 14.sp,
-                            modifier = Modifier.graphicsLayer {
-                                val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                val weight = f.coerceIn(0f, 1f)
-                                scaleX = 0.95f + weight * 0.12f
-                                scaleY = 0.95f + weight * 0.12f
-                            }
+                            fontSize = 14.sp
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            Text(
-                                text = "Together",
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = inactiveTextColor,
-                                modifier = Modifier.graphicsLayer {
-                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                    val weight = f.coerceIn(0f, 1f)
-                                    this.alpha = (1f - weight).coerceIn(0f, 1f)
-                                }
-                            )
-                            Text(
-                                text = "Together",
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = pillTextColor,
-                                modifier = Modifier.graphicsLayer {
-                                    val f = (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
-                                    val weight = f.coerceIn(0f, 1f)
-                                    this.alpha = weight.coerceIn(0f, 1f)
-                                }
-                            )
-                        }
+                        Text(
+                            text = "Together",
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 13.5.sp,
+                            fontWeight = if (isTogether) FontWeight.Bold else FontWeight.Medium,
+                            color = togetherTextColor
+                        )
                     }
                 }
             }

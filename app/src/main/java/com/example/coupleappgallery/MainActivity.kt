@@ -9,6 +9,11 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.core.app.ActivityCompat
@@ -235,7 +240,23 @@ class MainActivity : ComponentActivity() {
             NavHost(navController = navController, startDestination = "splash") {
                 composable("splash") { SplashScreen(navController, currentTheme) }
                 composable("login") { LoginScreen(navController) }
-                composable("home") { HomeScreen(navController, currentTheme) }
+                composable(
+                    "home",
+                    exitTransition = {
+                        slideOutOfContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Start,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) { it / 4 } + fadeOut(animationSpec = tween(200))
+                    },
+                    popEnterTransition = {
+                        slideIntoContainer(
+                            AnimatedContentTransitionScope.SlideDirection.End,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) { it / 4 } + fadeIn(animationSpec = tween(200))
+                    }
+                ) {
+                    HomeScreen(navController, currentTheme)
+                }
 
                 composable(
                     "gallery/{folderId}",
@@ -245,7 +266,35 @@ class MainActivity : ComponentActivity() {
                     GalleryScreen(navController, folderId, currentTheme)
                 }
 
-                composable("chat") { ChatScreen(navController, currentTheme) }
+                composable(
+                    "chat",
+                    enterTransition = {
+                        slideIntoContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Start,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(200))
+                    },
+                    exitTransition = {
+                        slideOutOfContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Start,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) + fadeOut(animationSpec = tween(200))
+                    },
+                    popEnterTransition = {
+                        slideIntoContainer(
+                            AnimatedContentTransitionScope.SlideDirection.End,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(200))
+                    },
+                    popExitTransition = {
+                        slideOutOfContainer(
+                            AnimatedContentTransitionScope.SlideDirection.End,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) + fadeOut(animationSpec = tween(200))
+                    }
+                ) {
+                    ChatScreen(navController, currentTheme)
+                }
                 composable("profile") { ProfileScreen(navController, currentTheme) }
                 composable("settings") { SettingsScreen(navController, currentTheme) }
             }

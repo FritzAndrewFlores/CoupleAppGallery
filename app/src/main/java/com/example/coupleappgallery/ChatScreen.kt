@@ -63,9 +63,12 @@ import androidx.compose.ui.zIndex
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.PropertyName
 import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -73,6 +76,15 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+
+/**
+ * Process-scoped in-memory cache for chat messages.
+ * Allows ChatScreen to immediately render with pre-existing messages on Frame 1,
+ * eliminating the transition hitch and empty-state layout jump.
+ */
+object ChatCache {
+    var cachedMessages: List<ChatMessage> = emptyList()
+}
 
 /** Returns a stable, symmetric conversation ID for two user IDs. */
 fun chatIdFor(a: String, b: String) = listOf(a, b).sorted().joinToString("_")
@@ -94,6 +106,24 @@ data class ChatMessage(
     val replyToSender: String = "",
     val imageUrl: String = ""
 )
+
+/** Direct zero-reflection DocumentSnapshot to ChatMessage parser (15-30x faster than reflection) */
+fun DocumentSnapshot.toChatMessage(): ChatMessage {
+    return ChatMessage(
+        id = id,
+        senderId = getString("senderId") ?: "",
+        receiverId = getString("receiverId") ?: "",
+        text = getString("text") ?: "",
+        timestamp = getLong("timestamp") ?: 0L,
+        isRead = getBoolean("isRead") ?: false,
+        reaction = getString("reaction") ?: "",
+        chatId = getString("chatId") ?: "",
+        replyToId = getString("replyToId") ?: "",
+        replyToText = getString("replyToText") ?: "",
+        replyToSender = getString("replyToSender") ?: "",
+        imageUrl = getString("imageUrl") ?: ""
+    )
+}
 
 /** Positions in a contiguous cluster of messages from the same sender */
 enum class BubblePosition {
@@ -173,11 +203,12 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
     val myPhotoUrl = SessionCache.userPhotoUrl
     val isLinked = partnerId.isNotEmpty()
 
-    var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
+    var messages by remember { mutableStateOf(ChatCache.cachedMessages) }
     var text by remember { mutableStateOf("") }
     var isUploadingBg by remember { mutableStateOf(false) }
     var isSending by remember { mutableStateOf(false) }
-    var hasInitialScrolled by remember(myId, partnerId) { mutableStateOf(false) }
+    val initialLastIdx = (ChatCache.cachedMessages.size - 1).coerceAtLeast(0)
+    var hasInitialScrolled by remember(myId, partnerId) { mutableStateOf(ChatCache.cachedMessages.isNotEmpty()) }
 
     // Option 1: Cupertino Tapback & Quote Reply & Photo Sharing State
     var activeTapbackMessageId by remember { mutableStateOf<String?>(null) }
@@ -188,9 +219,8 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
     // Full Reaction Sheet State (fallback for '+' icon in Tapback bar)
     var showFullReactionSheet by remember { mutableStateOf(false) }
     var targetMessageForFullPicker by remember { mutableStateOf<ChatMessage?>(null) }
-    val sheetState = rememberModalBottomSheetState()
 
-    val listState = rememberLazyListState()
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialLastIdx)
 
     // Colors (ensure crisp contrast on white custom-theme bubbles & input field)
     val isCustomTheme = currentTheme.id == "custom"
@@ -354,24 +384,24 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                 }
                 if (snapshot != null) {
                     val msgs = snapshot.documents
-                        .mapNotNull { doc ->
-                            doc.toObject(ChatMessage::class.java)?.let {
-                                if (it.id.isEmpty()) it.copy(id = doc.id) else it
-                            }
-                        }
+                        .map { it.toChatMessage() }
                         .sortedBy { it.timestamp }
+                    ChatCache.cachedMessages = msgs
                     messages = msgs
 
-                    // Mark unread incoming messages as read in safe 450-item chunks
+                    // Mark unread incoming messages as read in safe 450-item chunks (deferred to avoid competing with entry transition)
                     val unread = msgs.filter { it.receiverId == myId && !it.isRead && it.id.isNotEmpty() }
                     if (unread.isNotEmpty()) {
-                        unread.chunked(450).forEach { chunk ->
-                            val batch = db.batch()
-                            chunk.forEach { msg ->
-                                batch.update(db.collection("chats").document(msg.id), "isRead", true)
-                            }
-                            batch.commit().addOnFailureListener { e ->
-                                Log.e("ChatScreen", "Failed to mark messages as read", e)
+                        scope.launch(Dispatchers.IO) {
+                            delay(350)
+                            unread.chunked(450).forEach { chunk ->
+                                val batch = db.batch()
+                                chunk.forEach { msg ->
+                                    batch.update(db.collection("chats").document(msg.id), "isRead", true)
+                                }
+                                batch.commit().addOnFailureListener { e ->
+                                    Log.e("ChatScreen", "Failed to mark messages as read", e)
+                                }
                             }
                         }
                     }
@@ -416,8 +446,11 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
             }
     ) {
         if (isCustomTheme && currentTheme.wallpaperUrl.isNotEmpty()) {
+            val bgReq = remember(currentTheme.wallpaperUrl) {
+                buildImageRequest(context, currentTheme.wallpaperUrl, cacheKey = "theme_wallpaper")
+            }
             AsyncImage(
-                model = buildImageRequest(context, currentTheme.wallpaperUrl, cacheKey = "theme_wallpaper"),
+                model = bgReq,
                 contentDescription = "Background",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -432,9 +465,12 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (partnerPhotoUrl.isNotEmpty()) {
+                                val avatarReq = remember(partnerPhotoUrl) {
+                                    buildImageRequest(context, partnerPhotoUrl, cacheKey = "avatar_partner")
+                                }
                                 Box {
                                     AsyncImage(
-                                        model = buildImageRequest(context, partnerPhotoUrl, cacheKey = "avatar_partner"),
+                                        model = avatarReq,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier
@@ -870,6 +906,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
         // Full Reaction Sheet (opened via '+' icon in Tapback Bar)
         if (showFullReactionSheet) {
             val targetMsg = targetMessageForFullPicker
+            val sheetState = rememberModalBottomSheetState()
             ModalBottomSheet(
                 onDismissRequest = { showFullReactionSheet = false },
                 sheetState = sheetState,

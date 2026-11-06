@@ -876,169 +876,15 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                         item { Spacer(modifier = Modifier.height(60.dp)) }
                     }
                 } else {
-                    // TOGETHER TAB: your-status editor on top, then mood / wants / note / wishlist cards
-                    val visibleCards = cardOrder.filter {
-                        it != HomeCardType.WISHLIST || activeRequests.isNotEmpty()
-                    }
-                    val density = LocalDensity.current
-                    val spacingPx = with(density) { 16.dp.toPx() }
-                    val defaultCardHeightPx = with(density) { 180.dp.toPx() }
-                    val hysteresisPx = with(density) { 10.dp.toPx() }
-                    val haptic = LocalHapticFeedback.current
-
-                    val cardHeights = remember { mutableStateMapOf<HomeCardType, Float>() }
-
-                    var activeDragInitialIndex by remember { mutableIntStateOf(-1) }
-                    var activeDragTargetIndex by remember { mutableIntStateOf(-1) }
-                    var rawDragDeltaY by remember { mutableFloatStateOf(0f) }
-                    var visualDragDeltaY by remember { mutableFloatStateOf(0f) }
-                    var isDragSettling by remember { mutableStateOf(false) }
-                    var reorderVersion by remember { mutableIntStateOf(0) }
-                    var settleJob by remember { mutableStateOf<Job?>(null) }
-
-                    fun currentVisibleCards(): List<HomeCardType> = cardOrder.filter {
-                        it != HomeCardType.WISHLIST || activeRequests.isNotEmpty()
-                    }
-
-                    fun computeLandingOffsets(cards: List<HomeCardType>, initIdx: Int): FloatArray {
-                        val offsets = FloatArray(cards.size)
-                        if (initIdx !in cards.indices) return offsets
-                        offsets[initIdx] = 0f
-                        for (k in (initIdx + 1)..cards.lastIndex) {
-                            val h = cardHeights[cards[k]] ?: defaultCardHeightPx
-                            offsets[k] = offsets[k - 1] + h + spacingPx
-                        }
-                        for (k in (initIdx - 1) downTo 0) {
-                            val h = cardHeights[cards[k]] ?: defaultCardHeightPx
-                            offsets[k] = offsets[k + 1] - (h + spacingPx)
-                        }
-                        return offsets
-                    }
-
-                    fun commitReorderNow(dragCard: HomeCardType?, targetIdx: Int) {
-                        val liveVisible = currentVisibleCards()
-                        if (dragCard != null) {
-                            val initIdx = liveVisible.indexOf(dragCard)
-                            if (initIdx in liveVisible.indices && targetIdx in liveVisible.indices && initIdx != targetIdx) {
-                                val from = cardOrder.indexOf(dragCard)
-                                val to = cardOrder.indexOf(liveVisible[targetIdx])
-                                if (from != -1 && to != -1 && from != to) {
-                                    cardOrder.add(to, cardOrder.removeAt(from))
-                                    saveHomeCardOrder(sharedPreferences, userId, cardOrder.toList())
-                                }
-                            }
-                        }
-                        activeDragCard = null
-                        activeDragInitialIndex = -1
-                        activeDragTargetIndex = -1
-                        rawDragDeltaY = 0f
-                        visualDragDeltaY = 0f
-                        isDragSettling = false
-                        reorderVersion++
-                    }
-
-                    val onCardDragStart: (HomeCardType) -> Unit = { cardType ->
-                        if (activeDragCard != null || isDragSettling) {
-                            // Ignore if drag is already active or settling
-                        } else {
-                            if (settleJob?.isActive == true) {
-                                settleJob?.cancel()
-                                settleJob = null
-                                commitReorderNow(activeDragCard, activeDragTargetIndex)
-                            }
-                            val liveVisible = currentVisibleCards()
-                            val initIdx = liveVisible.indexOf(cardType)
-                            if (initIdx != -1) {
-                                activeDragCard = cardType
-                                activeDragInitialIndex = initIdx
-                                activeDragTargetIndex = initIdx
-                                rawDragDeltaY = 0f
-                                visualDragDeltaY = 0f
-                                isDragSettling = false
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
-                        }
-                    }
-
-                    val onCardDragDelta: (Float) -> Unit = { deltaY ->
-                        val dragCard = activeDragCard
-                        if (dragCard != null && !isDragSettling) {
-                            val liveVisible = currentVisibleCards()
-                            val initIdx = liveVisible.indexOf(dragCard)
-                            if (initIdx == -1) {
-                                commitReorderNow(null, -1)
-                            } else {
-                                activeDragInitialIndex = initIdx
-                                rawDragDeltaY += deltaY
-                                val landingOffsets = computeLandingOffsets(liveVisible, initIdx)
-                                val minOffset = landingOffsets.first()
-                                val maxOffset = landingOffsets.last()
-                                visualDragDeltaY = when {
-                                    rawDragDeltaY < minOffset -> minOffset + (rawDragDeltaY - minOffset) * 0.28f
-                                    rawDragDeltaY > maxOffset -> maxOffset + (rawDragDeltaY - maxOffset) * 0.28f
-                                    else -> rawDragDeltaY
-                                }
-
-                                if (liveVisible.size > 1) {
-                                    var bestIndex = 0
-                                    for (k in 0 until liveVisible.lastIndex) {
-                                        val midpoint = (landingOffsets[k] + landingOffsets[k + 1]) / 2f
-                                        val threshold = if (activeDragTargetIndex <= k) {
-                                            midpoint + hysteresisPx
-                                        } else {
-                                            midpoint - hysteresisPx
-                                        }
-                                        if (visualDragDeltaY > threshold) {
-                                            bestIndex = k + 1
-                                        }
-                                    }
-                                    val clampedTarget = bestIndex.coerceIn(0, liveVisible.lastIndex)
-                                    if (clampedTarget != activeDragTargetIndex) {
-                                        activeDragTargetIndex = clampedTarget
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    val onCardDragEnd: () -> Unit = {
-                        val dragCard = activeDragCard
-                        if (dragCard != null && !isDragSettling) {
-                            val liveVisible = currentVisibleCards()
-                            val initIdx = liveVisible.indexOf(dragCard)
-                            val targetIdx = activeDragTargetIndex.coerceIn(0, (liveVisible.size - 1).coerceAtLeast(0))
-                            if (initIdx in liveVisible.indices && targetIdx in liveVisible.indices) {
-                                val targetLandingOffset = computeLandingOffsets(liveVisible, initIdx)[targetIdx]
-                                isDragSettling = true
-                                settleJob = coroutineScope.launch {
-                                    animate(
-                                        initialValue = visualDragDeltaY,
-                                        targetValue = targetLandingOffset,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = Spring.StiffnessMedium,
-                                            visibilityThreshold = 0.5f
-                                        )
-                                    ) { value, _ ->
-                                        visualDragDeltaY = value
-                                    }
-                                    commitReorderNow(dragCard, targetIdx)
-                                    settleJob = null
-                                }
-                            } else {
-                                commitReorderNow(null, -1)
-                            }
-                        }
-                    }
-
+                    // TOGETHER TAB: Option 1 — Romance Bento Grid
                     LazyColumn(
                         state = togetherListState,
                         userScrollEnabled = (activeDragCard == null),
                         contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        item {
+                        // 1. Hero Anniversary Banner
+                        item(key = "anniversary_hero") {
                             AnniversaryHeroBanner(
                                 theme = currentTheme,
                                 anniversaryDate = SessionCache.anniversaryDate,
@@ -1063,136 +909,87 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
                                 }
                             )
                         }
-                        item { YourStatusCard(currentTheme, db, context) }
-                        item(key = "status_cards_section") {
-                            Column(
+
+                        // 2. Compact "Your Status" Pill Bar
+                        item(key = "your_status_pill") {
+                            CompactYourStatusPill(
+                                theme = currentTheme,
+                                db = db,
+                                context = context,
+                                onTriggerParticles = triggerParticles
+                            )
+                        }
+
+                        // 3. Asymmetric 2-Column Bento Grid: Partner's Vibe + Love Note Postcard
+                        item(key = "bento_partner_grid") {
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                visibleCards.forEachIndexed { index, cardType ->
-                                    key(cardType) {
-                                        val currentCardBg = when (cardType) {
-                                            HomeCardType.MOOD -> moodBg
-                                            HomeCardType.REQUESTS -> requestBg
-                                            HomeCardType.NOTE -> noteBg
-                                            HomeCardType.WISHLIST -> wishlistBg
-                                        }
+                                BentoMoodTile(
+                                    modifier = Modifier.weight(1f),
+                                    mood = partnerMood,
+                                    partner = partnerName,
+                                    partnerStatus = partnerStatus,
+                                    partnerPhotoUrl = SessionCache.partnerPhotoUrl,
+                                    partnerId = partnerId,
+                                    reactions = reactions,
+                                    theme = currentTheme,
+                                    myName = myName,
+                                    db = db,
+                                    context = context,
+                                    onTrigger = triggerParticles,
+                                    bg = moodBg,
+                                    onColorPickClick = { showColorPickerFor = HomeCardType.MOOD }
+                                )
 
-                                        val isThisCardActive = (activeDragCard == cardType)
-                                        val isThisCardLifted = isThisCardActive && !isDragSettling
-                                        val draggedHeight = activeDragCard?.let { cardHeights[it] } ?: defaultCardHeightPx
-
-                                        val targetDisplacement = when {
-                                            isThisCardActive -> 0f
-                                            activeDragCard != null && activeDragInitialIndex != -1 && activeDragTargetIndex != -1 -> {
-                                                if (activeDragInitialIndex < activeDragTargetIndex && index in (activeDragInitialIndex + 1)..activeDragTargetIndex) {
-                                                    -(draggedHeight + spacingPx)
-                                                } else if (activeDragInitialIndex > activeDragTargetIndex && index in activeDragTargetIndex until activeDragInitialIndex) {
-                                                    +(draggedHeight + spacingPx)
-                                                } else {
-                                                    0f
-                                                }
-                                            }
-                                            else -> 0f
-                                        }
-
-                                        val neighborAnim = remember(cardType, reorderVersion) {
-                                            Animatable(0f)
-                                        }
-
-                                        LaunchedEffect(targetDisplacement, reorderVersion, isThisCardActive) {
-                                            if (isThisCardActive) {
-                                                neighborAnim.snapTo(0f)
-                                            } else if ((neighborAnim.value - targetDisplacement).absoluteValue > 0.5f) {
-                                                neighborAnim.animateTo(
-                                                    targetValue = targetDisplacement,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                                        stiffness = Spring.StiffnessMedium,
-                                                        visibilityThreshold = 0.5f
-                                                    )
-                                                )
-                                            } else if (neighborAnim.value != targetDisplacement) {
-                                                neighborAnim.snapTo(targetDisplacement)
-                                            }
-                                        }
-
-                                        val translationY = if (isThisCardActive) {
-                                            visualDragDeltaY
-                                        } else {
-                                            neighborAnim.value
-                                        }
-
-                                        DraggableCardWrapper(
-                                            type = cardType,
-                                            isExpanded = expandedStates[cardType] ?: true,
-                                            isActiveDrag = isThisCardActive,
-                                            isLifted = isThisCardLifted,
-                                            hoverEnabled = (activeDragCard == null),
-                                            translationY = translationY,
-                                            onHeightMeasured = { h ->
-                                                if (cardHeights[cardType] != h) {
-                                                    cardHeights[cardType] = h
-                                                }
-                                            },
-                                            onDragStart = { onCardDragStart(cardType) },
-                                            onDragDelta = onCardDragDelta,
-                                            onDragEnd = onCardDragEnd,
-                                            onExpandToggle = {
-                                                val newState = !(expandedStates[cardType] ?: true)
-                                                expandedStates[cardType] = newState
-                                                sharedPreferences.edit {
-                                                    putBoolean("card_expanded_${userId}_${cardType.name}", newState)
-                                                }
-                                            },
-                                            onColorPickClick = { showColorPickerFor = cardType },
-                                            bg = currentCardBg
-                                        ) {
-                                            when (cardType) {
-                                                HomeCardType.MOOD -> MoodCard(
-                                                    mood = partnerMood,
-                                                    partner = partnerName,
-                                                    reactions = reactions,
-                                                    theme = currentTheme,
-                                                    myName = myName,
-                                                    partnerId = partnerId,
-                                                    db = db,
-                                                    context = context,
-                                                    onTrigger = triggerParticles,
-                                                    bg = moodBg
-                                                )
-                                                HomeCardType.REQUESTS -> RequestCard(
-                                                    options = requestOptions,
-                                                    partnerId = partnerId,
-                                                    myName = myName,
-                                                    db = db,
-                                                    context = context,
-                                                    onTrigger = triggerParticles,
-                                                    bg = requestBg
-                                                )
-                                                HomeCardType.NOTE -> NoteCard(
-                                                    note = partnerNote,
-                                                    partner = partnerName,
-                                                    partnerId = partnerId,
-                                                    bg = noteBg
-                                                )
-                                                HomeCardType.WISHLIST -> WishlistCard(
-                                                    requests = activeRequests,
-                                                    partnerName = partnerName,
-                                                    partnerId = partnerId,
-                                                    myName = myName,
-                                                    db = db,
-                                                    primary = primaryColor,
-                                                    onTrigger = triggerParticles,
-                                                    bg = wishlistBg
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                BentoNoteTile(
+                                    modifier = Modifier.weight(1f),
+                                    note = partnerNote,
+                                    partner = partnerName,
+                                    partnerId = partnerId,
+                                    theme = currentTheme,
+                                    bg = noteBg,
+                                    onColorPickClick = { showColorPickerFor = HomeCardType.NOTE }
+                                )
                             }
                         }
-                        item { Spacer(modifier = Modifier.height(24.dp)) }
+
+                        // 4. Interactive Wants & Requests Ribbon
+                        item(key = "bento_wants_ribbon") {
+                            BentoRequestRibbon(
+                                options = requestOptions,
+                                partnerId = partnerId,
+                                partnerName = partnerName,
+                                myName = myName,
+                                theme = currentTheme,
+                                db = db,
+                                context = context,
+                                onTrigger = triggerParticles,
+                                bg = requestBg,
+                                onColorPickClick = { showColorPickerFor = HomeCardType.REQUESTS }
+                            )
+                        }
+
+                        // 5. Active Granted Partner Wishes Ribbon (if any active requests from partner)
+                        if (activeRequests.isNotEmpty()) {
+                            item(key = "bento_active_wishes_ribbon") {
+                                BentoWishlistRibbon(
+                                    requests = activeRequests,
+                                    partnerName = partnerName,
+                                    partnerId = partnerId,
+                                    myName = myName,
+                                    db = db,
+                                    theme = currentTheme,
+                                    primary = primaryColor,
+                                    onTrigger = triggerParticles,
+                                    bg = wishlistBg,
+                                    onColorPickClick = { showColorPickerFor = HomeCardType.WISHLIST }
+                                )
+                            }
+                        }
+
+                        item { Spacer(modifier = Modifier.height(36.dp)) }
                     }
                 }
             }
@@ -1435,6 +1232,1162 @@ fun FloatingParticle(particle: Particle) {
                 .offset(x = ((particle.startX - 0.5f) * 320).dp, y = yOffset.dp)
                 .alpha(alpha)
         )
+    }
+}
+
+// ============================================================================
+// OPTION 1: ROMANCE BENTO GRID COMPOSABLES
+// ============================================================================
+
+/**
+ * Compact "Your Status" Pill Bar
+ * Elegant frosted glass capsule displaying your online presence, mood & love note,
+ * with quick 1-tap buttons to update either.
+ */
+@Composable
+fun CompactYourStatusPill(
+    theme: AppTheme,
+    db: FirebaseFirestore,
+    context: Context,
+    onTriggerParticles: (String) -> Unit
+) {
+    val uid = SessionCache.userId
+    val partnerId = SessionCache.partnerId
+    val myName = SessionCache.userName
+    val currentMood = SessionCache.userMood
+    val currentNote = SessionCache.userLoveNote
+    val haptic = LocalHapticFeedback.current
+
+    var showMoodPicker by remember { mutableStateOf(false) }
+    var showNoteEditor by remember { mutableStateOf(false) }
+    var noteDraft by remember { mutableStateOf("") }
+
+    val isDark = theme.primary.luminance() < 0.55f
+    val textColor = if (isDark) Color.White else Color(0xFF1E293B)
+    val pillBg = if (isDark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.08f)
+    val pillBorder = if (isDark) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.12f)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .bouncyHover(haptic = haptic, scaleOnHover = 1.015f, scaleOnPress = 0.985f)
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        theme.primary.copy(alpha = 0.90f),
+                        theme.secondary.copy(alpha = 0.82f)
+                    )
+                )
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.40f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Left: Status indicator & current vibe / quote
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (currentMood.isNotEmpty()) {
+                            onTriggerParticles(currentMood)
+                        }
+                        showMoodPicker = true
+                    }
+                    .padding(end = 8.dp)
+            ) {
+                // Online dot + Mood icon badge
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(pillBg)
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (currentMood.isNotEmpty()) currentMood else "✨",
+                        fontSize = 20.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF4CAF50))
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "YOU",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.3.sp,
+                            color = textColor.copy(alpha = 0.85f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(1.dp))
+                    Text(
+                        text = when {
+                            currentNote.isNotEmpty() -> "“$currentNote”"
+                            currentMood.isNotEmpty() -> "Feeling $currentMood"
+                            else -> "Share your vibe today ✨"
+                        },
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = if (currentNote.isNotEmpty()) FontStyle.Italic else FontStyle.Normal,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Right: 2 Compact pill buttons (Mood & Note)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Mood Button
+                Box(
+                    modifier = Modifier
+                        .bouncyHover(haptic = haptic, scaleOnHover = 1.08f, scaleOnPress = 0.92f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(pillBg)
+                        .border(0.5.dp, pillBorder, RoundedCornerShape(12.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showMoodPicker = true
+                        }
+                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (currentMood.isNotEmpty()) currentMood else "😊", fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "Mood",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                    }
+                }
+
+                // Note Button
+                Box(
+                    modifier = Modifier
+                        .bouncyHover(haptic = haptic, scaleOnHover = 1.08f, scaleOnPress = 0.92f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(pillBg)
+                        .border(0.5.dp, pillBorder, RoundedCornerShape(12.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            noteDraft = currentNote
+                            showNoteEditor = true
+                        }
+                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("💌", fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "Note",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Mood picker dialog
+    if (showMoodPicker) {
+        Dialog(onDismissRequest = { showMoodPicker = false }) {
+            Box(modifier = Modifier.fillMaxWidth().glassCard(0.95f).padding(20.dp)) {
+                Column {
+                    Text("How are you feeling?", fontWeight = FontWeight.Bold, color = theme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.heightIn(max = 360.dp)
+                    ) {
+                        items(Moods, key = { it.emoji }) { mood ->
+                            val emoji = mood.emoji
+                            val label = mood.label
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (currentMood == emoji) theme.primary.copy(alpha = 0.15f) else Color.Transparent
+                                    )
+                                    .clickable {
+                                        if (uid.isNotEmpty()) {
+                                            db.collection("users").document(uid).update("mood", emoji)
+                                            if (partnerId.isNotEmpty()) {
+                                                sendNotification(
+                                                    db,
+                                                    partnerId,
+                                                    "Mood Update $emoji",
+                                                    "$myName is feeling $label $emoji"
+                                                )
+                                            }
+                                            Toast.makeText(context, "Mood set to $label", Toast.LENGTH_SHORT).show()
+                                        }
+                                        showMoodPicker = false
+                                    }
+                                    .padding(6.dp)
+                            ) {
+                                Text(emoji, fontSize = 36.sp)
+                                Text(label, fontSize = 11.sp, color = Color.DarkGray)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Love note editor dialog
+    if (showNoteEditor) {
+        Dialog(onDismissRequest = { showNoteEditor = false }) {
+            Box(modifier = Modifier.fillMaxWidth().glassCard(0.95f).padding(20.dp)) {
+                Column {
+                    Text("Leave a Love Note", fontWeight = FontWeight.Bold, color = theme.primary)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = noteDraft,
+                        onValueChange = { noteDraft = it },
+                        label = { Text("Your note") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (currentNote.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (uid.isNotEmpty()) {
+                                        db.collection("users").document(uid).update("loveNote", "")
+                                        Toast.makeText(context, "Love note cleared", Toast.LENGTH_SHORT).show()
+                                    }
+                                    showNoteEditor = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red.copy(alpha = 0.8f))
+                            ) {
+                                Text("Clear")
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                if (uid.isNotEmpty()) {
+                                    db.collection("users").document(uid).update("loveNote", noteDraft.trim())
+                                    if (partnerId.isNotEmpty() && noteDraft.trim().isNotEmpty()) {
+                                        sendNotification(
+                                            db,
+                                            partnerId,
+                                            "New Love Note 💌",
+                                            "$myName left you a love note!"
+                                        )
+                                    }
+                                    Toast.makeText(context, "Love note saved! 💌", Toast.LENGTH_SHORT).show()
+                                }
+                                showNoteEditor = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
+                        ) {
+                            Text("Save")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Bento Tile: Partner's Vibe (MoodCard)
+ * Square/tall bento tile featuring ambient breathing glow, partner photo avatar,
+ * large floating mood emoji, mood label, quick reaction pills, and full reaction dialog.
+ */
+@Composable
+fun BentoMoodTile(
+    modifier: Modifier = Modifier,
+    mood: String,
+    partner: String,
+    partnerStatus: String,
+    partnerPhotoUrl: String,
+    partnerId: String,
+    reactions: List<Reaction>,
+    theme: AppTheme,
+    myName: String,
+    db: FirebaseFirestore,
+    context: Context,
+    onTrigger: (String) -> Unit,
+    bg: CardBackground,
+    onColorPickClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val textCol = if (bg.darkText) Color(0xFF1E293B) else Color.White
+    val pillBg = if (bg.darkText) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.20f)
+    val cardBrush = Brush.linearGradient(bg.colors)
+    val cardShape = RoundedCornerShape(24.dp)
+
+    var showReactionMenu by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "bentoMoodBreathe")
+    val glowScale by infiniteTransition.animateFloat(
+        initialValue = 0.90f,
+        targetValue = 1.10f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowScale"
+    )
+    val floatOffset by infiniteTransition.animateFloat(
+        initialValue = -3f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "floatOffset"
+    )
+
+    val moodLabel = remember(mood) { Moods.find { it.emoji == mood }?.label ?: "Feeling $mood" }
+    val isOnline = partnerId.isNotEmpty() && partnerStatus == "Online"
+
+    Box(
+        modifier = modifier
+            .height(250.dp)
+            .bouncyHover(haptic = haptic, scaleOnHover = 1.025f, scaleOnPress = 0.975f)
+            .clip(cardShape)
+            .background(cardBrush)
+            .border(1.dp, Color.White.copy(alpha = 0.35f), cardShape)
+            .padding(14.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Row: Partner tag with online indicator + discrete palette icon
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (partnerPhotoUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = buildImageRequest(context, partnerPhotoUrl, cacheKey = "avatar_partner_bento"),
+                            contentDescription = partner,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isOnline) Color(0xFF4CAF50) else Color.Gray)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                    }
+                    Text(
+                        text = "${partner.ifEmpty { "PARTNER" }.uppercase()}'S VIBE",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        color = textCol.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 100.dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .bouncyHover(haptic = haptic, scaleOnHover = 1.15f, scaleOnPress = 0.88f)
+                        .clip(CircleShape)
+                        .background(pillBg)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onColorPickClick()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Palette,
+                        contentDescription = "Card Theme",
+                        tint = textCol,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            // Center: Breathing ambient glow + Floating mood emoji & Serif label
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (mood.isNotEmpty()) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onTrigger(mood)
+                        }
+                    }
+            ) {
+                if (partnerId.isNotEmpty() && mood.isNotEmpty()) {
+                    Box(contentAlignment = Alignment.Center) {
+                        // Ambient breathing glow halo
+                        Box(
+                            modifier = Modifier
+                                .size(68.dp)
+                                .scale(glowScale)
+                                .clip(CircleShape)
+                                .background(
+                                    if (bg.darkText) Color.Black.copy(alpha = 0.06f)
+                                    else Color.White.copy(alpha = 0.18f)
+                                )
+                        )
+                        Text(
+                            text = mood,
+                            fontSize = 44.sp,
+                            modifier = Modifier.offset(y = floatOffset.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = moodLabel,
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = textCol,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(pillBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("💭", fontSize = 28.sp)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (partnerId.isEmpty()) "Link partner" else "Waiting for vibe ✨",
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = 12.sp,
+                        color = textCol.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            // Bottom: Quick reaction pills + More button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val quickReactions = reactions.take(2)
+                quickReactions.forEach { rx ->
+                    Box(
+                        modifier = Modifier
+                            .bouncyHover(haptic = haptic, scaleOnHover = 1.1f, scaleOnPress = 0.9f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(pillBg)
+                            .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onTrigger(rx.emoji)
+                                if (partnerId.isNotEmpty()) {
+                                    sendNotification(
+                                        db,
+                                        partnerId,
+                                        "Reaction ${rx.emoji}",
+                                        "$myName sent a ${rx.label}!"
+                                    )
+                                    Toast.makeText(context, "Sent ${rx.label}!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(rx.emoji, fontSize = 14.sp)
+                    }
+                }
+
+                // Dropdown for full reaction menu
+                Box(
+                    modifier = Modifier
+                        .bouncyHover(haptic = haptic, scaleOnHover = 1.1f, scaleOnPress = 0.9f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(pillBg)
+                        .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showReactionMenu = true
+                        }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("…", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = textCol)
+                }
+            }
+        }
+    }
+
+    // Full reaction picker dialog
+    if (showReactionMenu) {
+        Dialog(onDismissRequest = { showReactionMenu = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .glassCard(0.95f)
+                    .padding(18.dp)
+            ) {
+                Column {
+                    Text(
+                        "Send Love to $partner",
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = theme.primary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(reactions, key = { it.label }) { reaction ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .bouncyHover(haptic = haptic, scaleOnHover = 1.12f, scaleOnPress = 0.90f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        onTrigger(reaction.emoji)
+                                        if (partnerId.isNotEmpty()) {
+                                            sendNotification(
+                                                db,
+                                                partnerId,
+                                                "Reaction ${reaction.emoji}",
+                                                "$myName sent a ${reaction.label}!"
+                                            )
+                                            Toast.makeText(context, "Sent ${reaction.label}!", Toast.LENGTH_SHORT).show()
+                                        }
+                                        showReactionMenu = false
+                                    }
+                                    .padding(4.dp)
+                            ) {
+                                Text(reaction.emoji, fontSize = 32.sp)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    reaction.label,
+                                    fontFamily = FontFamily.Serif,
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    color = Color.DarkGray
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Bento Tile: Love Note Postcard (NoteCard)
+ * Styled as a romantic physical postcard / parchment letter with a mini postage stamp badge,
+ * elegant quotation in italic Serif font, and a delicate sign-off.
+ */
+@Composable
+fun BentoNoteTile(
+    modifier: Modifier = Modifier,
+    note: String,
+    partner: String,
+    partnerId: String,
+    theme: AppTheme,
+    bg: CardBackground,
+    onColorPickClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val textCol = if (bg.darkText) Color(0xFF1E293B) else Color.White
+    val pillBg = if (bg.darkText) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.20f)
+    val cardBrush = Brush.linearGradient(bg.colors)
+    val cardShape = RoundedCornerShape(24.dp)
+
+    var showFullLetter by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .height(250.dp)
+            .bouncyHover(haptic = haptic, scaleOnHover = 1.025f, scaleOnPress = 0.975f)
+            .clip(cardShape)
+            .background(cardBrush)
+            .border(1.dp, Color.White.copy(alpha = 0.35f), cardShape)
+            .padding(14.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Row: Postage stamp / wax seal badge + discrete palette icon
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Postage stamp badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(pillBg)
+                        .border(0.5.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Text("💌", fontSize = 11.sp)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "POSTCARD",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                        color = textCol.copy(alpha = 0.9f)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .bouncyHover(haptic = haptic, scaleOnHover = 1.15f, scaleOnPress = 0.88f)
+                        .clip(CircleShape)
+                        .background(pillBg)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onColorPickClick()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Palette,
+                        contentDescription = "Card Theme",
+                        tint = textCol,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            // Body: Frosted parchment area with romantic italic serif quotation
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(vertical = 8.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(pillBg)
+                    .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                    .clickable {
+                        if (note.isNotEmpty()) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showFullLetter = true
+                        }
+                    }
+                    .padding(10.dp)
+            ) {
+                if (note.isNotEmpty()) {
+                    Text(
+                        text = "“$note”",
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        color = textCol
+                    )
+                } else {
+                    Text(
+                        text = if (partnerId.isEmpty()) "Link partner to receive love notes 💌" else "No love note yet... Tap to leave one! 💌",
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        fontSize = 12.sp,
+                        color = textCol.copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            // Bottom: Sign-off
+            Text(
+                text = if (partnerId.isNotEmpty()) "— with love, $partner 💕" else "— love note",
+                fontFamily = FontFamily.Serif,
+                fontStyle = FontStyle.Italic,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = textCol.copy(alpha = 0.85f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+
+    // Full letter preview dialog
+    if (showFullLetter && note.isNotEmpty()) {
+        Dialog(onDismissRequest = { showFullLetter = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(cardBrush)
+                    .border(1.5.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                    .padding(24.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("💌", fontSize = 38.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "A LETTER FROM ${partner.uppercase()}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp,
+                        color = textCol.copy(alpha = 0.85f)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "“$note”",
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 18.sp,
+                        lineHeight = 26.sp,
+                        textAlign = TextAlign.Center,
+                        color = textCol
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = "— Forever yours, $partner 💕",
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 13.5.sp,
+                        color = textCol.copy(alpha = 0.9f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Interactive Horizontal Ribbon: Wants & Requests
+ * Sleek ribbon card with quick horizontal scrollable wish capsules and 1-tap hint sending.
+ */
+@Composable
+fun BentoRequestRibbon(
+    options: List<Reaction>,
+    partnerId: String,
+    partnerName: String,
+    myName: String,
+    theme: AppTheme,
+    db: FirebaseFirestore,
+    context: Context,
+    onTrigger: (String) -> Unit,
+    bg: CardBackground,
+    onColorPickClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val textCol = if (bg.darkText) Color(0xFF1E293B) else Color.White
+    val pillBg = if (bg.darkText) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.20f)
+    val cardBrush = Brush.linearGradient(bg.colors)
+    val cardShape = RoundedCornerShape(24.dp)
+
+    var showMenu by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .bouncyHover(haptic = haptic, scaleOnHover = 1.015f, scaleOnPress = 0.985f)
+            .clip(cardShape)
+            .background(cardBrush)
+            .border(1.dp, Color.White.copy(alpha = 0.35f), cardShape)
+            .padding(16.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Header Row: Title & subtitle + palette & more actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("👉👈", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "I WANT...",
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = textCol
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "• Drop a sweet hint",
+                        fontSize = 11.sp,
+                        color = textCol.copy(alpha = 0.75f)
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Palette button
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .bouncyHover(haptic = haptic, scaleOnHover = 1.15f, scaleOnPress = 0.88f)
+                            .clip(CircleShape)
+                            .background(pillBg)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onColorPickClick()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Palette,
+                            contentDescription = "Card Theme",
+                            tint = textCol,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+
+                    // More Wishes button
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .bouncyHover(haptic = haptic, scaleOnHover = 1.15f, scaleOnPress = 0.88f)
+                            .clip(CircleShape)
+                            .background(pillBg)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showMenu = true
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowDropDown,
+                            contentDescription = "More Wishes",
+                            tint = textCol,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Horizontal Ribbon of Wish Capsules
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(options, key = { it.label }) { req ->
+                    Box(
+                        modifier = Modifier
+                            .bouncyHover(haptic = haptic, scaleOnHover = 1.08f, scaleOnPress = 0.92f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(pillBg)
+                            .border(0.5.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (sendRequest(req, partnerId, myName, db, context)) {
+                                    onTrigger(req.emoji)
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(req.emoji, fontSize = 15.sp)
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                req.label,
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textCol
+                            )
+                        }
+                    }
+                }
+
+                item(key = "more_wishes_chip") {
+                    Box(
+                        modifier = Modifier
+                            .bouncyHover(haptic = haptic, scaleOnHover = 1.08f, scaleOnPress = 0.92f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(pillBg)
+                            .border(0.5.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showMenu = true
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("✨", fontSize = 15.sp)
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                "+ More",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textCol
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showMenu) {
+        Dialog(onDismissRequest = { showMenu = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .glassCard(0.95f)
+                    .padding(18.dp)
+            ) {
+                Column {
+                    Text(
+                        "Make a Wish for $partnerName",
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color(0xFF1F1F1F)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(4),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(options, key = { it.label }) { req ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .bouncyHover(haptic = haptic, scaleOnHover = 1.12f, scaleOnPress = 0.90f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        if (sendRequest(req, partnerId, myName, db, context)) {
+                                            onTrigger(req.emoji)
+                                        }
+                                        showMenu = false
+                                    }
+                                    .padding(4.dp)
+                            ) {
+                                Text(req.emoji, fontSize = 32.sp)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    req.label,
+                                    fontFamily = FontFamily.Serif,
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    color = Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Partner's Active Granted Wishes Ribbon (WishlistCard)
+ * Highlights active pending wishes from partner with a shining "Grant Wish 💕" action.
+ */
+@Composable
+fun BentoWishlistRibbon(
+    requests: List<PartnerRequest>,
+    partnerName: String,
+    partnerId: String,
+    myName: String,
+    db: FirebaseFirestore,
+    theme: AppTheme,
+    primary: Color,
+    onTrigger: (String) -> Unit,
+    bg: CardBackground,
+    onColorPickClick: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val textCol = if (bg.darkText) Color(0xFF1E293B) else Color.White
+    val pillBg = if (bg.darkText) Color.Black.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.20f)
+    val cardBrush = Brush.linearGradient(bg.colors)
+    val cardShape = RoundedCornerShape(24.dp)
+    val context = LocalContext.current
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .bouncyHover(haptic = haptic, scaleOnHover = 1.015f, scaleOnPress = 0.985f)
+            .clip(cardShape)
+            .background(cardBrush)
+            .border(1.dp, Color.White.copy(alpha = 0.35f), cardShape)
+            .padding(16.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🌠", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "${partnerName.uppercase()}'S ACTIVE WISHES",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.3.sp,
+                        color = textCol.copy(alpha = 0.85f)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(pillBg)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "${requests.size}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textCol
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .bouncyHover(haptic = haptic, scaleOnHover = 1.15f, scaleOnPress = 0.88f)
+                        .clip(CircleShape)
+                        .background(pillBg)
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onColorPickClick()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Palette,
+                        contentDescription = "Card Theme",
+                        tint = textCol,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                requests.forEach { req ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(pillBg)
+                            .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(req.emoji, fontSize = 20.sp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                req.label,
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textCol
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .bouncyHover(haptic = haptic, scaleOnHover = 1.08f, scaleOnPress = 0.92f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (bg.darkText) primary else Color.White)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onTrigger("💖")
+                                    db.collection("requests").document(req.id).delete()
+                                    sendNotification(
+                                        db,
+                                        partnerId,
+                                        "Wish Granted! 💖",
+                                        "$myName granted your wish: ${req.label} ${req.emoji}!"
+                                    )
+                                    Toast.makeText(context, "Granted ${req.label}!", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "Grant Wish 💕",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (bg.darkText) Color.White else primary
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

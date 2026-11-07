@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,8 +72,10 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
     // Theme state
     var selectedThemeId by remember { mutableStateOf(SessionCache.themeId) }
     var customWallpaper by remember { mutableStateOf(SessionCache.themeWallpaper) }
+    var chatWallpaper by remember { mutableStateOf(SessionCache.chatWallpaper) }
     var syncWithPartner by remember { mutableStateOf(true) }
     var isUploadingWallpaper by remember { mutableStateOf(false) }
+    var isUploadingChatWallpaper by remember { mutableStateOf(false) }
 
     val initialPrimaryColor = if (SessionCache.themeId == "custom") {
         Color(SessionCache.themePrimary)
@@ -109,7 +112,8 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                     themeFields["themeSecondary"] = preset.secondary.toArgb()
                     themeFields["themeBg"] = preset.background.toArgb()
                     themeFields["themeText"] = preset.text.toArgb()
-                    themeFields["themeWallpaper"] = ""
+                    // Option A: Retain wallpaper without forcing themeId = "custom"
+                    themeFields["themeWallpaper"] = wallpaperUrl
                 }
 
                 db.collection("users").document(userUid).set(themeFields, SetOptions.merge()).await()
@@ -136,9 +140,8 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                     val wallRef = storage.reference.child("theme_wallpapers/$userUid.jpg")
                     val downloadUrl = uploadCompressedJpeg(context, uri, wallRef)
                     customWallpaper = downloadUrl
-                    selectedThemeId = "custom"
-                    applyThemeChanges("custom", customPrimaryColor, downloadUrl)
-                    Toast.makeText(context, "Custom wallpaper applied! ✨", Toast.LENGTH_SHORT).show()
+                    applyThemeChanges(selectedThemeId, customPrimaryColor, downloadUrl)
+                    Toast.makeText(context, "App wallpaper applied! ✨", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Log.e("SettingsScreen", "Wallpaper upload failed", e)
                     val errorMsg = when {
@@ -149,6 +152,60 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                     Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                 } finally {
                     isUploadingWallpaper = false
+                }
+            }
+        }
+    }
+
+    val chatWallpaperLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null && userUid.isNotEmpty()) {
+            isUploadingChatWallpaper = true
+            scope.launch {
+                try {
+                    val wallRef = storage.reference.child("chat_wallpapers/$userUid.jpg")
+                    val downloadUrl = uploadCompressedJpeg(context, uri, wallRef)
+                    chatWallpaper = downloadUrl
+                    val updates = mapOf("chatWallpaper" to downloadUrl)
+                    db.collection("users").document(userUid).set(updates, SetOptions.merge()).await()
+                    if (syncWithPartner && partnerId.isNotEmpty()) {
+                        runCatching {
+                            db.collection("users").document(partnerId).set(updates, SetOptions.merge()).await()
+                        }.onFailure { e ->
+                            Log.w("SettingsScreen", "Partner chat wallpaper sync failed", e)
+                        }
+                    }
+                    Toast.makeText(context, "Chat wallpaper updated! ✨", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e("SettingsScreen", "Chat wallpaper upload failed", e)
+                    val errorMsg = when {
+                        e.message?.contains("billing account", ignoreCase = true) == true || e.message?.contains("402") == true ->
+                            "Storage blocked: Billing account is closed in Firebase Console."
+                        else -> "Failed to upload chat wallpaper: ${e.localizedMessage ?: "Please retry."}"
+                    }
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                } finally {
+                    isUploadingChatWallpaper = false
+                }
+            }
+        }
+    }
+
+    val onRemoveChatWallpaper: () -> Unit = {
+        if (userUid.isNotEmpty()) {
+            scope.launch {
+                try {
+                    val updates = mapOf("chatWallpaper" to "")
+                    db.collection("users").document(userUid).set(updates, SetOptions.merge()).await()
+                    if (syncWithPartner && partnerId.isNotEmpty()) {
+                        runCatching {
+                            db.collection("users").document(partnerId).set(updates, SetOptions.merge()).await()
+                        }
+                    }
+                    chatWallpaper = ""
+                    Toast.makeText(context, "Chat wallpaper removed.", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e("SettingsScreen", "Error removing chat wallpaper", e)
+                    Toast.makeText(context, "Could not remove wallpaper.", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -210,7 +267,7 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.clickable {
                                     selectedThemeId = key
-                                    applyThemeChanges(key, theme.primary, "")
+                                    applyThemeChanges(key, theme.primary, customWallpaper)
                                 }
                             ) {
                                 Box(
@@ -254,8 +311,8 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("Custom Hue & Wallpaper", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = textColor)
-                            Text("Choose your exact color & custom background", fontSize = 12.sp, color = Color.Gray)
+                            Text("Custom Color Hue", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = textColor)
+                            Text("Choose your exact custom primary color", fontSize = 12.sp, color = Color.Gray)
                         }
                         Switch(
                             checked = selectedThemeId == "custom",
@@ -266,7 +323,7 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                                 } else {
                                     selectedThemeId = "forest_green"
                                     val defaultTheme = appThemes["forest_green"] ?: DefaultAppTheme
-                                    applyThemeChanges("forest_green", defaultTheme.primary, "")
+                                    applyThemeChanges("forest_green", defaultTheme.primary, customWallpaper)
                                 }
                             },
                             colors = SwitchDefaults.colors(
@@ -289,39 +346,82 @@ fun SettingsScreen(navController: NavController, currentTheme: AppTheme) {
                                     applyThemeChanges("custom", customPrimaryColor, customWallpaper)
                                 }
                             )
+                        }
+                    }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = textColor.copy(alpha = 0.1f))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                            OutlinedButton(
-                                onClick = { wallpaperLauncher.launch("image/*") },
-                                enabled = !isUploadingWallpaper,
-                                modifier = Modifier.fillMaxWidth()
+                    // Option A: Distinct Wallpaper Management
+                    Text("Wallpapers", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = textColor)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 1. Global App Wallpaper
+                    Text("App Background Wallpaper", style = MaterialTheme.typography.labelSmall, color = textColor.copy(alpha = 0.7f))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = { wallpaperLauncher.launch("image/*") },
+                        enabled = !isUploadingWallpaper,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isUploadingWallpaper) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Image, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (customWallpaper.isEmpty()) "Upload App Wallpaper" else "Change App Wallpaper")
+                        }
+                    }
+
+                    if (customWallpaper.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("App wallpaper active", fontSize = 12.sp, color = Color.Gray)
+                            TextButton(
+                                onClick = {
+                                    customWallpaper = ""
+                                    applyThemeChanges(selectedThemeId, customPrimaryColor, "")
+                                }
                             ) {
-                                if (isUploadingWallpaper) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.Default.Image, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(if (customWallpaper.isEmpty()) "Upload Background Wallpaper" else "Change Wallpaper")
-                                }
+                                Text("Remove", color = Color.Red, fontSize = 12.sp)
                             }
+                        }
+                    }
 
-                            if (customWallpaper.isNotEmpty()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Custom wallpaper active", fontSize = 12.sp, color = Color.Gray)
-                                    TextButton(
-                                        onClick = {
-                                            customWallpaper = ""
-                                            applyThemeChanges("custom", customPrimaryColor, "")
-                                        }
-                                    ) {
-                                        Text("Remove", color = Color.Red, fontSize = 12.sp)
-                                    }
-                                }
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 2. Chat Screen Wallpaper
+                    Text("Chat Screen Wallpaper", style = MaterialTheme.typography.labelSmall, color = textColor.copy(alpha = 0.7f))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = { chatWallpaperLauncher.launch("image/*") },
+                        enabled = !isUploadingChatWallpaper,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isUploadingChatWallpaper) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Wallpaper, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (chatWallpaper.isEmpty()) "Upload Chat Wallpaper" else "Change Chat Wallpaper")
+                        }
+                    }
+
+                    if (chatWallpaper.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Chat wallpaper active", fontSize = 12.sp, color = Color.Gray)
+                            TextButton(
+                                onClick = { onRemoveChatWallpaper() }
+                            ) {
+                                Text("Remove", color = Color.Red, fontSize = 12.sp)
                             }
                         }
                     }

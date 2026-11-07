@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -66,6 +67,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.PropertyName
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -222,14 +224,20 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
 
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialLastIdx)
 
-    // Colors (ensure crisp contrast on white custom-theme bubbles & input field)
+    // Option A: Dedicated Chat Wallpaper state (independent of themeId and global wallpaper)
+    var showWallpaperDialog by remember { mutableStateOf(false) }
+    var syncChatWallpaperWithPartner by remember { mutableStateOf(true) }
+    val activeChatWallpaper = SessionCache.chatWallpaper.ifEmpty { currentTheme.wallpaperUrl }
+    val hasWallpaper = activeChatWallpaper.isNotEmpty()
+
+    // Colors (ensure crisp contrast on white bubbles & input field)
     val isCustomTheme = currentTheme.id == "custom"
     val primaryColor = currentTheme.primary
     val backgroundColor = currentTheme.background
     val surfaceColor = currentTheme.surface
     val textColor = currentTheme.text
     val secondaryColor = currentTheme.secondary
-    val cardTextOnLightSurface = if (isCustomTheme) Color(0xFF1F1F1F) else textColor
+    val cardTextOnLightSurface = if (isCustomTheme || hasWallpaper || textColor.luminance() > 0.6f) Color(0xFF1F1F1F) else textColor
 
     val chatTimeFmt = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
@@ -241,34 +249,56 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
         }
     }
 
+    // Option A: Dedicated Chat Wallpaper upload to Firebase Storage (never overwrites themeId or colors)
     val wallpaperLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null && myId.isNotEmpty()) {
             isUploadingBg = true
             scope.launch {
                 try {
-                    val base64DataUri = compressToBase64DataUri(context, uri, maxDim = 1080, quality = 72)
-                    val updates = mapOf(
-                        "themeId" to "custom",
-                        "themePrimary" to primaryColor.toArgb(),
-                        "themeSecondary" to secondaryColor.toArgb(),
-                        "themeBg" to backgroundColor.toArgb(),
-                        "themeText" to textColor.toArgb(),
-                        "themeWallpaper" to base64DataUri
-                    )
-                    db.collection("users").document(myId).update(updates).await()
-                    if (partnerId.isNotEmpty()) {
+                    val wallRef = storage.reference.child("chat_wallpapers/$myId.jpg")
+                    val downloadUrl = uploadCompressedJpeg(context, uri, wallRef)
+                    val updates = mapOf("chatWallpaper" to downloadUrl)
+                    db.collection("users").document(myId).set(updates, SetOptions.merge()).await()
+                    if (syncChatWallpaperWithPartner && partnerId.isNotEmpty()) {
                         runCatching {
-                            db.collection("users").document(partnerId).update(updates).await()
+                            db.collection("users").document(partnerId).set(updates, SetOptions.merge()).await()
                         }.onFailure { e ->
-                            Log.w("ChatScreen", "Partner wallpaper sync failed", e)
+                            Log.w("ChatScreen", "Partner chat wallpaper sync failed", e)
                         }
                     }
-                    Toast.makeText(context, "Global Theme Wallpaper Updated! ✨", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Chat Wallpaper Updated! ✨", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Log.e("ChatScreen", "Wallpaper upload failed", e)
-                    Toast.makeText(context, "Wallpaper upload failed.", Toast.LENGTH_SHORT).show()
+                    val errorMsg = when {
+                        e.message?.contains("billing account", ignoreCase = true) == true || e.message?.contains("402") == true ->
+                            "Storage blocked: Billing account is closed in Firebase Console."
+                        else -> "Failed to upload wallpaper: ${e.localizedMessage ?: "Please retry."}"
+                    }
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                 } finally {
                     isUploadingBg = false
+                }
+            }
+        }
+    }
+
+    val onRemoveChatWallpaper: () -> Unit = {
+        if (myId.isNotEmpty()) {
+            scope.launch {
+                try {
+                    val updates = mapOf("chatWallpaper" to "")
+                    db.collection("users").document(myId).set(updates, SetOptions.merge()).await()
+                    if (syncChatWallpaperWithPartner && partnerId.isNotEmpty()) {
+                        runCatching {
+                            db.collection("users").document(partnerId).set(updates, SetOptions.merge()).await()
+                        }.onFailure { e ->
+                            Log.w("ChatScreen", "Partner chat wallpaper remove sync failed", e)
+                        }
+                    }
+                    Toast.makeText(context, "Chat wallpaper removed.", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e("ChatScreen", "Error removing chat wallpaper", e)
+                    Toast.makeText(context, "Could not remove wallpaper.", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -445,17 +475,18 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                 }
             }
     ) {
-        if (isCustomTheme && currentTheme.wallpaperUrl.isNotEmpty()) {
-            val bgReq = remember(currentTheme.wallpaperUrl) {
-                buildImageRequest(context, currentTheme.wallpaperUrl, cacheKey = "theme_wallpaper")
+        if (hasWallpaper) {
+            val bgReq = remember(activeChatWallpaper) {
+                buildImageRequest(context, activeChatWallpaper, cacheKey = "chat_wallpaper")
             }
             AsyncImage(
                 model = bgReq,
-                contentDescription = "Background",
+                contentDescription = "Chat Background",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+            // Soft darkening scrim protects contrast for all bubble colors and status text
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)))
         }
 
         Scaffold(
@@ -518,13 +549,13 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                     actions = {
                         IconButton(
                             enabled = !isUploadingBg && myId.isNotEmpty(),
-                            onClick = { wallpaperLauncher.launch("image/*") }
+                            onClick = { showWallpaperDialog = true }
                         ) {
-                            Icon(Icons.Default.Wallpaper, contentDescription = "Background")
+                            Icon(Icons.Default.Wallpaper, contentDescription = "Wallpaper", tint = Color.White)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = if (isCustomTheme) Color.Black.copy(0.4f) else primaryColor,
+                        containerColor = if (hasWallpaper) primaryColor.copy(alpha = 0.94f) else primaryColor,
                         titleContentColor = Color.White,
                         navigationIconContentColor = Color.White,
                         actionIconContentColor = Color.White
@@ -552,7 +583,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                                     .fillMaxWidth()
                                     .padding(bottom = 6.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(if (isCustomTheme) Color.White.copy(alpha = 0.94f) else surfaceColor)
+                                    .background(if (isCustomTheme || hasWallpaper) Color.White.copy(alpha = 0.94f) else surfaceColor)
                                     .border(0.5.dp, Color.Black.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -607,7 +638,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                                     .fillMaxWidth()
                                     .padding(bottom = 6.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(if (isCustomTheme) Color.White.copy(alpha = 0.94f) else surfaceColor)
+                                    .background(if (isCustomTheme || hasWallpaper) Color.White.copy(alpha = 0.94f) else surfaceColor)
                                     .border(0.5.dp, Color.Black.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                                     .padding(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -655,7 +686,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                             .fillMaxWidth()
                             .shadow(4.dp, RoundedCornerShape(26.dp))
                             .clip(RoundedCornerShape(26.dp))
-                            .background(if (isCustomTheme) Color.White.copy(alpha = 0.96f) else surfaceColor)
+                            .background(if (isCustomTheme || hasWallpaper) Color.White.copy(alpha = 0.96f) else surfaceColor)
                             .border(0.5.dp, Color.Black.copy(alpha = 0.10f), RoundedCornerShape(26.dp))
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -749,7 +780,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                 ) {
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isCustomTheme) Color.White.copy(alpha = 0.92f) else surfaceColor
+                            containerColor = if (isCustomTheme || hasWallpaper) Color.White.copy(alpha = 0.92f) else surfaceColor
                         ),
                         shape = RoundedCornerShape(20.dp)
                     ) {
@@ -809,12 +840,18 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                                     .padding(top = 16.dp, bottom = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = formatChatDateHeader(msg.timestamp),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = if (isCustomTheme) Color.White.copy(alpha = 0.85f) else Color.Gray
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (hasWallpaper) Color.Black.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.05f)
+                                ) {
+                                    Text(
+                                        text = formatChatDateHeader(msg.timestamp),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (hasWallpaper) Color.White.copy(alpha = 0.90f) else Color.Gray,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -826,7 +863,7 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                             primaryColor = primaryColor,
                             secondaryColor = secondaryColor,
                             surfaceColor = surfaceColor,
-                            isCustomTheme = isCustomTheme,
+                            hasWallpaper = hasWallpaper,
                             cardTextOnLightSurface = cardTextOnLightSurface,
                             partnerPhotoUrl = partnerPhotoUrl,
                             isTapbackActive = isTapbackActive,
@@ -949,6 +986,74 @@ fun ChatScreen(navController: NavController, currentTheme: AppTheme) {
                 }
             }
         }
+
+        // Option A: Dedicated Chat Wallpaper Selection & Management Dialog
+        if (showWallpaperDialog) {
+            AlertDialog(
+                onDismissRequest = { showWallpaperDialog = false },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Wallpaper, contentDescription = null, tint = primaryColor)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Chat Wallpaper", fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "Customize the background for your chat. This only affects the chat screen and keeps your theme colors and messages crisp and readable.",
+                            fontSize = 13.sp,
+                            color = Color.Gray
+                        )
+                        if (isLinked) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { syncChatWallpaperWithPartner = !syncChatWallpaperWithPartner }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = syncChatWallpaperWithPartner,
+                                    onCheckedChange = { syncChatWallpaperWithPartner = it },
+                                    colors = CheckboxDefaults.colors(checkedColor = primaryColor)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Update for $partnerName too", fontSize = 13.sp, color = Color(0xFF1F1F1F))
+                            }
+                        }
+                        if (SessionCache.chatWallpaper.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    showWallpaperDialog = false
+                                    onRemoveChatWallpaper()
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Remove Chat Wallpaper", color = Color.Red, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showWallpaperDialog = false
+                            wallpaperLauncher.launch("image/*")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                    ) {
+                        Text(if (hasWallpaper) "Change Photo" else "Choose Photo")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showWallpaperDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -1037,7 +1142,7 @@ fun CupertinoSwipeableMessageItem(
     primaryColor: Color,
     secondaryColor: Color,
     surfaceColor: Color,
-    isCustomTheme: Boolean,
+    hasWallpaper: Boolean,
     cardTextOnLightSurface: Color,
     partnerPhotoUrl: String,
     isTapbackActive: Boolean,
@@ -1098,7 +1203,7 @@ fun CupertinoSwipeableMessageItem(
     val bubbleBgColor = if (isMe) {
         primaryColor
     } else {
-        if (isCustomTheme) Color.White.copy(alpha = 0.94f) else Color(0xFFE9E9EB)
+        if (hasWallpaper) Color.White.copy(alpha = 0.94f) else Color(0xFFE9E9EB)
     }
 
     val verticalPadding = when (bubblePosition) {
@@ -1220,7 +1325,7 @@ fun CupertinoSwipeableMessageItem(
                                 else Modifier.background(bubbleBgColor)
                             )
                             .border(
-                                width = if (!isMe && isCustomTheme) 0.5.dp else 0.dp,
+                                width = if (!isMe && hasWallpaper) 0.5.dp else 0.dp,
                                 color = Color.White.copy(alpha = 0.4f),
                                 shape = bubbleShape
                             )
@@ -1333,7 +1438,7 @@ fun CupertinoSwipeableMessageItem(
                         Text(
                             text = chatTimeFmt.format(Date(msg.timestamp)),
                             fontSize = 10.5.sp,
-                            color = if (isCustomTheme) Color.White.copy(0.75f) else Color.Gray
+                            color = if (hasWallpaper) Color.White.copy(0.85f) else Color.Gray
                         )
                         if (isLastMessageByMe) {
                             Spacer(modifier = Modifier.width(4.dp))
@@ -1341,7 +1446,7 @@ fun CupertinoSwipeableMessageItem(
                                 text = if (msg.isRead) "• Read" else "• Delivered",
                                 fontSize = 10.5.sp,
                                 fontWeight = if (msg.isRead) FontWeight.Bold else FontWeight.Normal,
-                                color = if (msg.isRead) secondaryColor else Color.Gray
+                                color = if (msg.isRead) secondaryColor else if (hasWallpaper) Color.White.copy(0.75f) else Color.Gray
                             )
                         }
                     }

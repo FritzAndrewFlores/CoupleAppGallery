@@ -692,7 +692,7 @@ fun HomeScreen(navController: NavController, currentTheme: AppTheme) {
     }
 
     Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
-        if (currentTheme.id == "custom" && currentTheme.wallpaperUrl.isNotEmpty()) {
+        if (currentTheme.wallpaperUrl.isNotEmpty()) {
             AsyncImage(
                 model = buildImageRequest(LocalContext.current, currentTheme.wallpaperUrl, cacheKey = "theme_wallpaper"),
                 contentDescription = null,

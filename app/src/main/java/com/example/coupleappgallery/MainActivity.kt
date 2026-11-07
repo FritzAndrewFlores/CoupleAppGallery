@@ -202,7 +202,8 @@ class MainActivity : ComponentActivity() {
                         wallpaperUrl = SessionCache.themeWallpaper
                     )
                 } else {
-                    appThemes[SessionCache.themeId] ?: DefaultAppTheme
+                    val preset = appThemes[SessionCache.themeId] ?: DefaultAppTheme
+                    preset.copy(wallpaperUrl = SessionCache.themeWallpaper)
                 }
             }
 

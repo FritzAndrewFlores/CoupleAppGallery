@@ -81,6 +81,8 @@ object SessionCache {
         private set
     var themeWallpaper by mutableStateOf("")
         private set
+    var chatWallpaper by mutableStateOf("")
+        private set
 
     // Card-background prefs read by HomeScreen
     var moodBgId by mutableStateOf("glass_light")
@@ -166,6 +168,7 @@ object SessionCache {
             themeBg = (doc.getLong("themeBg") ?: 0xFFF4F9F4L).toInt()
             themeText = (doc.getLong("themeText") ?: 0xFF4A3728L).toInt()
             themeWallpaper = doc.getString("themeWallpaper") ?: ""
+            chatWallpaper = doc.getString("chatWallpaper") ?: ""
 
             moodBgId = doc.getString("moodBgId") ?: "glass_light"
             requestBgId = doc.getString("requestBgId") ?: "grad_romantic"
@@ -227,6 +230,7 @@ object SessionCache {
         themeBg = 0xFFF4F9F4.toInt()
         themeText = 0xFF4A3728.toInt()
         themeWallpaper = ""
+        chatWallpaper = ""
         partnerName = "Partner"
         partnerPhotoUrl = ""
         partnerMood = ""
